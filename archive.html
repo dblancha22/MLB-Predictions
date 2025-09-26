@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>MLB Betting Archive</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial
+        }
+        /*                              title bar                               */
+        .titlebar{padding:12px 20px;border-bottom:1px solid rgba(0,0,0,.08)}
+
+        /*                              tabs bar                                */
+        .tabbar{
+            display:flex;
+            justify-content:space-between;                                      /* header on the left + tabs on the right */
+            align-items:center;                                                 /* align them vertically */
+            padding:8px 20px
+        }
+        .left-meta{display:flex;flex-direction:column;gap:2px}
+        .section-title{
+            margin:0;
+            color:#5b6b7c;
+            font-weight:600;
+            font-size:18px
+        }
+
+        .tabs{display:flex;gap:8px}                                             /* puts gap between tabs */
+        .tab{padding:6px 10px;border-radius:8px;text-decoration:none;color:inherit} /* formats tabs, no more underline */
+        .tab:hover{background:rgba(0,0,0,.06)}                                /* gray tab background when hovering over it */
+
+        /*                          archive date picker                         */
+        .archive-controls{
+            display: flex;
+            justify-content: center;                                            /* centers horizontally */
+            padding: 8px 12px;
+        }
+        .drop-btn{                                                              /* trigger button */
+            font-size: 13px; padding: 10px 12px; border: 1px solid #e5e9f0;
+            border-radius: 8px; background: #fff; color: #0f172a; cursor: pointer;
+        }
+        .dropdown{position: relative}                                           /* base dropdown*/
+        .menu{
+            position:absolute; top:100%; left:0; min-width:140px;
+            margin:6px 0 0; padding:6px 0; list-style:none;
+            background:#fff; border:1px solid #e5e9f0; border-radius:8px;
+            box-shadow:0 8px 24px rgba(0,0,0,.08);
+            display:none; z-index:20;
+        }
+        .dropdown.open > .menu{display: block}
+        .menu a{                                                                /* menu items */
+            display:block; padding:8px 12px; color:#0f172a; text-decoration:none;
+        }
+        .menu a:hover{background:#f7f9fc}
+        .drop-btn:focus-visible, .menu a:focus-visible{                         /* accessible focus */
+            outline:2px solid #2563eb; outline-offset:2px;
+        }
+        .has-sub{position: relative}                                            /* sub-menus */
+        .submenu{                                                               /* formate sub-menus to fly out to the right, but hidden by default */
+            position: absolute;
+            top: 0;
+            left: 100%;                                                         /* place to the right of parent menu */
+            /* margin-left: 6px;                                                   small gap between panels */
+            min-width: 100px;
+            padding: 6px 0;
+            list-style: none;
+            background: #fff;
+            border: 1px solid #e5e9f0;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,.08);
+            display: none;
+            z-index: 25;
+            max-height: 200px;                                                  /* size of the box */
+            overflow-y: auto;                                                   /* scrollbar when needed */
+            overscroll-behavior: contain;                                    /*   prevents bubbling scroll to page */
+            -webkit-overflow-scrolling: touch;                                  /* smooth scrolling on iOS */
+        }
+        .has-sub:hover > .submenu { display: block; }                           /* Show submenu on hover */
+        .has-sub > a::after{                                                    /* caret indicator on items with a submenu */
+            content: "▸";
+            margin-left: 8px;
+            color: #94a3b8;
+            font-size: 12px;
+        }
+
+
+        /*                      Content Area (prediction table)                 */
+        .content{padding: 20px}
+        table{
+            width:100%;                                                         /* fills narrow screens */
+            max-width:900px;                                                    /* doesn't get too wide on big screens */
+            margin:0 auto;                                                      /* <-- centers the table block horizontally */
+            /* border-collapse:collapse;   keeps single lines between cells */
+            border:1px solid #e5e9f0;                                         /* <-- outline around the whole table */
+            border-radius:10px;                                                 /* <-- rounded corners */
+            overflow:hidden;                                                    /* <-- clip inner backgrounds to the radius */
+        }
+        thead th{
+            text-align: center;font-weight: 600;color:#5b6b7c;font-size:15px;
+            letter-spacing:.02em;padding:10px 12px;border-bottom:1px solid #e5e9f0
+        }
+        tbody td{text-align:center; padding:10px 12px;border-bottom:1px solid #e5e9f0}
+        tbody tr:hover{ background:#f7f9fc }
+        .res-win{color:#059669; font-weight:700; }  /* green check */
+        .res-loss{ color:#dc2626; font-weight:700; }  /* red  X */
+    </style>
+</head>
+
+<body>
+    <!--                            title bar                                   -->
+    <div class="titlebar">
+        <h1 style="margin:0">MLB Betting Predictions</h1>
+    </div>
+    <!--                bar under title with header and tabs                    -->
+    <div class="tabbar">
+        <div class="left-meta">                                                 <!-- left side, with title and date-->
+            <div class="section-title">Archive</div>
+        </div>
+        <nav class="tabs">                                                      <!-- right side with tabs -->
+            <a href="./" class="tab">Today</a>
+            <a href="./archive.html" class="tab" aria-current="page">Archive</a>
+        </nav>
+    </div>
+
+    <!--            this is where the user can select the date                  -->
+    <div class="archive-controls">
+        <div class="dropdown" id="season-dropdown">
+            <button class="drop-btn" id="season-btn">Choose Date</button>
+            <ul class="menu">
+                <li><a href="#" data-reset>- Select -</a></li>
+                <li class="menu-sep" aria-hidden="true"></li>
+                <li class="has-sub">
+                    <a href="#" data-season="2025">2025 Season</a>
+                    <!-- submenu will get filled from csv -->
+                    <ul class="submenu" id="season-2025-dates"></ul>
+                    <!-- more seasons will go here -->
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!--                            Table Area                                  -->
+    <main class="content">
+        <div id="table-wrap" hidden>
+            <table id="prediction-table">
+                <thead>
+                    <tr>
+                        <th>Game</th>
+                        <th>Pick</th>
+                        <th>Moneyline Odds</th>
+                        <th>Actual Winner</th>
+                        <th>Prediction Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        const szn_dd = document.getElementById('season-dropdown');
+        const szn_btn = document.getElementById('season-btn');
+        const DEFAULT_LABEL = 'Choose Date';
+        const ARCHIVE_URL = './archive.csv';
+        let selectedDate = null;
+
+        //                      reset handler
+        document.querySelector('#season-dropdown [data-reset]').addEventListener('click', (e) => {
+            e.preventDefault();
+            szn_btn.textContent = DEFAULT_LABEL;                                // back to placeholder
+            szn_dd.classList.remove('open');                                    // close menu
+            document.getElementById('table-wrap').hidden = true;                // hide table
+            selectedDate = null;
+        });
+
+        //                  open/close the dropdown
+        szn_btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            szn_dd.classList.toggle('open');
+        });
+        document.addEventListener('click', () => szn_dd.classList.remove('open'));
+
+        // Prevent clicking the season link from navigating (keeps submenu open)
+        document.querySelectorAll('#season-dropdown [data-season]').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+
+        //                  THIS IS WHERE WE GET DATA FROM ARCHIVE CSV
+        // csv parser
+        function parseCSV(text) {
+            const lines = text.split(/\r?\n/).filter(Boolean);                  // split into lines, drop empties
+            if(!lines.length) return [];                                        // empty file gives empty array
+            const header = lines[0].split(',').map(h => h.trim());              // first line = column headers
+            return lines.slice(1).map(line => {                                 // for each data line
+                const cells = line.split(',');
+                const obj = {};
+                header.forEach((h, i) => obj[h] = (cells[i] ?? '').trim());
+                return obj;
+            })
+        }
+
+        // group rows by Date
+        function groupByDate(rows) {
+            const map = new Map();                                              // Map<DateLabel, Row[]>
+            for (const r of rows) {
+                const d = r['Date']                                             // read date col
+                if (!d) continue;                                               // skip if missing
+                if (!map.has(d)) map.set(d, []);
+                map.get(d).push(r);
+            }
+            return map;                                                         // use late to populate menu
+        }
+
+        // populate the season submenu with dates <li><a data-date="M/D/YYYY">M/D/YYYY</a>
+        function fillSeasonDates(dateMap, season) {
+            const ul = document.getElementById(`season-${season}-dates`);       // <ul id="season-2025-dates"
+            if (!ul) return;                                                    // if now found
+            ul.innerHTML = '';                                                  // clear old items
+
+            // filter to this season and sort in descending order (newest first)
+            const entries = [...dateMap.keys()]
+                .filter(label => {
+                    const parts = label.split('/');                             // M/D/YYYY
+                    const year = Number(parts[2]);
+                    return year === Number(season)                              // only keep requested season
+                })
+                .sort((a,b) => new Date(b) - new Date(a)
+            );
+            
+            for (const label of entries) {                                      // build <li><a></a> for each entry
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.dataset.date = label;                                         // keep M/D/YYYY as label
+                a.textContent = label;                                          // show M/D/YYYY in the UI
+                li.appendChild(a);
+                ul.appendChild(li);
+            }
+
+            // hook clicks for these dates.
+            ul.querySelectorAll('a[data-date]').forEach(a => {
+                a.addEventListener('click', (e) => {
+                    e.preventDefault();                                         // dont jump to #
+                    e.stopPropagation();                                        // keeps control with click
+                    const label = a.dataset.date;
+                    // set button text and keep behavior
+                    szn_btn.textContent = label;                                // put label on button
+                    szn_dd.classList.remove('open');                            // close dropdown
+
+                    // show table and render rows
+                    const rows = window.__DATE_MAP.get(label) || [];            // grap all rows for that date
+                    document.getElementById('table-wrap').hidden = false;       // reveal table area
+                    renderArchiveRows(rows); // defined below -> put rows into table
+                });
+            });
+        }
+
+        // render rows into table
+        function renderArchiveRows(rows) {
+            const tbody = document.querySelector('#prediction-table tbody');      // table body
+            if (!tbody) return;                                             // guard for no table
+            tbody.innerHTML = '';                                           // clear old rows
+
+            // keep only confident edges (> 1.0 run differential)
+            const filtered = rows.filter(r => {
+                const diff = parseFloat(r['Predicted Diff']);
+                return Number.isFinite(diff) && Math.abs(diff) > 1;
+            });
+
+            // handles the case where no predictions are confident enough
+            if (filtered.length === 0) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td colspan="5" style="text-align:center; color:#5b6b7c;">
+                    No predictions with |Predicted Diff| &gt; 1.0 for this date.
+                    </td>`;
+                tbody.appendChild(tr);
+                return;
+            }
+
+            for (const r of filtered) {
+                const tr = document.createElement('tr');                    // new table row
+                const game = `${r['Away Team']} @ ${r['Home Team']}`;
+                const pick = r['Predicted Team'] || '-';
+                const odds = r['Predicted Team Odds'] || '-';
+                const winr = r['Winner'] || '-';
+
+                const resultRaw = (r['Prediction Result'] || '').toLowerCase();
+                let resultIcon = '—';
+                // if (resultRaw === 'win') resultIcon = `<span role="img" aria-label="Win">✅</span>`;
+                // if (resultRaw === 'loss') resultIcon = `<span role="img" aria-label="Loss">❌</span>`;
+                if (resultRaw === 'win') resultIcon = `<span class="res-win"  title="Win">✔</span>`;
+                if (resultRaw === 'loss') resultIcon = `<span class="res-loss" title="Loss">×</span>`;
+
+                tr.innerHTML = `
+                    <td>${game}</td>
+                    <td>${pick}</td>
+                    <td>${odds}</td>
+                    <td>${winr}</td>
+                    <td>${resultIcon}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        // this function calls the others, fetching the csv, parsing, grouping, and filling submenu
+        (async function initArchive() {
+            try {
+                const res = await fetch(`${ARCHIVE_URL}?v=${Date.now()}`);  // cache-bust
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);         // HTTP error guard
+                const text = await res.text();                              // get csv text
+                const rows = parseCSV(text);                                // array of object
+                console.log('archive rows:', rows.length, rows[0] && Object.keys(rows[0])); // <-- add
+                const dateMap = groupByDate(rows);                          // map by Date
+                console.log('unique dates:', dateMap.size, [...dateMap.keys()].slice(0, 5));   // <-- add
+                window.__DATE_MAP = dateMap;                                // stash globally
+                fillSeasonDates(dateMap, '2025');                           // populate 2025 submenu
+            } catch(err) {
+                console.error('Failed to load archive.csv: ', err);         // will trigger if fetch fails
+            }
+        })();
+
+    </script>
+</body>
+
+</html>

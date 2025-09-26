@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>MLB Betting</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial
+        }
+        .titlebar{padding:12px 20px;border-bottom:1px solid rgba(0,0,0,.08)} /* title bar */
+        .tabbar{ /* tabs bar */
+            display:flex;
+            justify-content:space-between; /* header on the left + tabs on the right */
+            align-items:flex-start; /* align them vertically */
+            padding:8px 20px
+        }
+        .left-meta{display:flex;flex-direction:column;gap:2px}
+        .section-title{
+            margin:0;
+            color:#5b6b7c;
+            font-weight:600;
+            font-size:18px
+        }
+        .section-date{color:#5b6b7c;font-size:13px}
+
+        .tabs{display:flex;gap:8px} /* puts gap between tabs */
+        .tab{padding:6px 10px;border-radius:8px;text-decoration:none;color:inherit} /* formats tabs, no more underline */
+        .tab:hover{background:rgba(0,0,0,.06)} /* gray tab background when hovering over it */
+
+        /* Content Area (prediction table) */
+        .content{padding: 20px}
+        table{
+            width:100%;                 /* fills narrow screens */
+            max-width:900px;            /* doesn't get too wide on big screens */
+            margin:0 auto;              /* <-- centers the table block horizontally */
+            /* border-collapse:collapse;   keeps single lines between cells */
+            border:1px solid #e5e9f0;   /* <-- outline around the whole table */
+            border-radius:10px;         /* <-- rounded corners */
+            overflow:hidden;            /* <-- clip inner backgrounds to the radius */
+        }
+        thead th{
+            text-align: center;font-weight: 600;color:#5b6b7c;font-size:15px;
+            letter-spacing:.02em;padding:10px 12px;border-bottom:1px solid #e5e9f0
+        }
+        tbody td{padding:10px 12px;border-bottom:1px solid #e5e9f0}
+        tbody tr:hover{ background:#f7f9fc }
+    </style>
+</head>
+
+<body>
+    <div class="titlebar"> <!-- title bar-->
+        <h1 style="margin:0">MLB Betting Predictions</h1>
+    </div>
+
+    <div class="tabbar"> <!-- bar under title with header and tabs-->
+        <div class="left-meta"> <!-- left side, with title and date-->
+            <div class="section-title">Today’s Slate</div>
+            <div class="section-date" id="today-date"></div>
+        </div>
+        <nav class="tabs"> <!-- right side with tabs -->
+            <a href="./" class="tab" aria-current="page">Today</a>
+            <a href="./archive.html" class="tab">Archive</a>
+        </nav>
+    </div>
+
+    <!-- Table Area -->
+    <main class="content">
+        <table id="prediction-table">
+            <thead>
+                <tr>
+                    <th>Game</th>
+                    <th>Pick</th>
+                    <th>Proj Margin of Victory</th>
+                    <th>Moneyline Odds</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </main>
+
+    <script>
+        document.getElementById('today-date').textContent =
+            new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    </script>
+</body>
+
+</html>
