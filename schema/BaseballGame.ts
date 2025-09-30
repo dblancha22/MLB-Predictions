@@ -36,14 +36,38 @@ export interface BaseballGame {
     }
   }
   
+// Helper function to get today and tomorrow dates
+const getTodayString = () => {
+  return new Date().toISOString().split('T')[0];
+};
+
+const getTomorrowString = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toISOString().split('T')[0];
+};
+
+const getTodayDate = (hour: number, minute: number = 0) => {
+  const today = new Date();
+  today.setHours(hour, minute, 0, 0);
+  return today;
+};
+
+const getTomorrowDate = (hour: number, minute: number = 0) => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(hour, minute, 0, 0);
+  return tomorrow;
+};
+
 // Mock data for demonstration
 export const mockGamesData: Record<string, BaseballGame[]> = {
-'2025-09-24': [
+[getTodayString()]: [
     {
     id: '1',
     gameMetadata: {
       status: 'scheduled',
-      dateTime: new Date('2025-09-24T19:05:00'),
+      dateTime: getTodayDate(19, 5),
       venue: 'Yankee Stadium',
       homeTeam: 'Yankees',
       awayTeam: 'Red Sox',
@@ -66,7 +90,7 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
     id: '2',
     gameMetadata: {
       status: 'live',
-      dateTime: new Date('2025-09-24T18:00:00'),
+      dateTime: getTodayDate(18, 0),
       venue: 'Dodger Stadium',
       homeTeam: 'Dodgers',
       awayTeam: 'Giants',
@@ -97,7 +121,7 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
     id: '3',
     gameMetadata: {
       status: 'final',
-      dateTime: new Date('2025-09-24T14:20:00'),
+      dateTime: getTodayDate(14, 20),
       venue: 'Wrigley Field',
       homeTeam: 'Cubs',
       awayTeam: 'Cardinals',
@@ -125,12 +149,12 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
     }
     }
 ],
-'2025-09-25': [
+[getTomorrowString()]: [
     {
     id: '4',
     gameMetadata: {
       status: 'scheduled',
-      dateTime: new Date('2025-09-25T20:10:00'),
+      dateTime: getTomorrowDate(20, 10),
       venue: 'Minute Maid Park',
       homeTeam: 'Astros',
       awayTeam: 'Rangers',
@@ -153,7 +177,7 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
     id: '5',
     gameMetadata: {
       status: 'scheduled',
-      dateTime: new Date('2025-09-25T19:10:00'),
+      dateTime: getTomorrowDate(19, 10),
       venue: 'Citi Field',
       homeTeam: 'Mets',
       awayTeam: 'Phillies',
@@ -169,31 +193,6 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
     awayTeamData: {
       awayTeam: 'Phillies',
       awayPitcher: 'Aaron Nola'
-    },
-    gameRealTimeData: {}
-    }
-],
-'2025-09-26': [
-    {
-    id: '6',
-    gameMetadata: {
-      status: 'scheduled',
-      dateTime: new Date('2025-09-26T21:40:00'),
-      venue: 'Petco Park',
-      homeTeam: 'Padres',
-      awayTeam: 'Diamondbacks',
-      odds: {
-        spread: { home: -3.0, away: 3.0 },
-        moneyline: { home: -200, away: 170 }
-      }
-    },
-    homeTeamData: {
-      homeTeam: 'Padres',
-      homePitcher: 'Yu Darvish'
-    },
-    awayTeamData: {
-      awayTeam: 'Diamondbacks',
-      awayPitcher: 'Zac Gallen'
     },
     gameRealTimeData: {}
     }
