@@ -1,7 +1,13 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
-import { useTheme } from '@/contexts/ThemeContext';
+import React from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+} from "react-native";
+import { useRouter, usePathname } from "expo-router";
+import { useTheme } from "@/contexts/ThemeContext";
 
 interface NavigationItem {
   name: string;
@@ -10,10 +16,10 @@ interface NavigationItem {
 }
 
 const navigationItems: NavigationItem[] = [
-  { name: 'Scores', path: '/', label: 'Scores' },
-  { name: 'BestBets', path: '/bestbets', label: 'Best Bets' },
-  { name: 'News', path: '/news', label: 'News' },
-  { name: 'Settings', path: '/settings', label: 'Settings' },
+  { name: "Scores", path: "/", label: "Scores" },
+  { name: "BestBets", path: "/bestbets", label: "Best Bets" },
+  { name: "History", path: "/history", label: "History" },
+  { name: "Settings", path: "/settings", label: "Settings" },
 ];
 
 export function NavigationHeader() {
@@ -28,7 +34,15 @@ export function NavigationHeader() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.cardBackground, borderBottomColor: colors.cardBorder }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.cardBackground,
+          borderBottomColor: colors.cardBorder,
+        },
+      ]}
+    >
       <Text style={[styles.title, { color: colors.text }]}>NoMoreTickets</Text>
       <View style={styles.navigationContainer}>
         {navigationItems.map((item) => (
@@ -36,19 +50,25 @@ export function NavigationHeader() {
             key={item.name}
             style={[
               styles.navButton,
-              { 
-                backgroundColor: pathname === item.path ? colors.dateSelectorSelected : 'transparent',
-                borderBottomColor: pathname === item.path ? colors.dateSelectorSelected : 'transparent'
-              }
+              {
+                backgroundColor:
+                  pathname === item.path
+                    ? colors.dateSelectorSelected
+                    : "transparent",
+                borderBottomColor:
+                  pathname === item.path
+                    ? colors.dateSelectorSelected
+                    : "transparent",
+              },
             ]}
             onPress={() => handleNavigation(item.path)}
           >
             <Text
               style={[
                 styles.navButtonText,
-                { 
-                  color: pathname === item.path ? '#fff' : colors.text 
-                }
+                {
+                  color: pathname === item.path ? "#fff" : colors.text,
+                },
               ]}
             >
               {item.label}
@@ -62,11 +82,11 @@ export function NavigationHeader() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingTop: Platform.OS === 'web' ? 20 : 50, // Less padding on web
+    paddingTop: Platform.OS === "web" ? 20 : 50, // Less padding on web
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 2,
@@ -77,13 +97,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     marginBottom: 16,
   },
   navigationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
   },
   navButton: {
     paddingHorizontal: 16,
@@ -91,10 +111,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderBottomWidth: 2,
     minWidth: 80,
-    alignItems: 'center',
+    alignItems: "center",
   },
   navButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });
