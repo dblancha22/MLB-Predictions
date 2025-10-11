@@ -15,10 +15,6 @@ export interface BetOnTeam {
       away: number;
     };
   };
-  // odds: {
-  //     plusMinus: '+' | '-';
-  //     value: number;
-  // };
   // For now we will not display confidence level related info, but we will keep the fields here for future use
   // confidenceLevel: number;
   // projectedScoreDiff: number;
@@ -37,7 +33,7 @@ export interface BetOnTotal {
   odds: number;
   result?: {
     outcome: "win" | "loss";
-    actualTotal: number;
+    // actualTotal: number;
     finalScore: {
       home: number;
       away: number;
@@ -225,7 +221,6 @@ export const mockBetOnTotalData: BetOnTotal[] = [
     odds: 115,
     result: {
       outcome: "win",
-      actualTotal: 9,
       finalScore: { home: 6, away: 3 },
     },
   },
@@ -239,7 +234,6 @@ export const mockBetOnTotalData: BetOnTotal[] = [
     odds: 105,
     result: {
       outcome: "loss",
-      actualTotal: 8,
       finalScore: { home: 5, away: 3 },
     },
   },
@@ -253,7 +247,6 @@ export const mockBetOnTotalData: BetOnTotal[] = [
     odds: 110,
     result: {
       outcome: "win",
-      actualTotal: 10,
       finalScore: { home: 7, away: 3 },
     },
   },
@@ -267,7 +260,6 @@ export const mockBetOnTotalData: BetOnTotal[] = [
     odds: 120,
     result: {
       outcome: "loss",
-      actualTotal: 9,
       finalScore: { home: 4, away: 5 },
     },
   },
@@ -281,7 +273,6 @@ export const mockBetOnTotalData: BetOnTotal[] = [
     odds: 100,
     result: {
       outcome: "win",
-      actualTotal: 6,
       finalScore: { home: 3, away: 3 },
     },
   },

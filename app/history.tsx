@@ -14,6 +14,7 @@ import {
   BetOnTeam,
   BetOnTotal,
 } from "@/schema/BetTypes";
+import CompletedBet from "@/components/CompletedBet";
 
 export default function History() {
   const { colors } = useTheme();
@@ -219,7 +220,7 @@ export default function History() {
             {bet.result.finalScore.home + bet.result.finalScore.away} runs
           </Text>
           <Text style={[styles.resultText, { color: colors.secondaryText }]}>
-            Total: {bet.result.actualTotal}
+            Total: {bet.result.finalScore.home + bet.result.finalScore.away}
           </Text>
         </View>
       )}
@@ -357,11 +358,21 @@ export default function History() {
         </View>
 
         {/* Results List */}
+        {/* <View style={styles.betsContainer}> */}
         <ScrollView style={styles.resultsList}>
-          {selectedTab === "team"
-            ? filteredTeamBets.map(renderTeamBet)
-            : filteredTotalBets.map(renderTotalBet)}
+          <View style={styles.betsContainer}>
+            {selectedTab === "team"
+              ? filteredTeamBets.map(renderTeamBet)
+              : filteredTotalBets.map(renderTotalBet)}
+            {filteredTeamBets.map((bet, index) => (
+              <CompletedBet key={`spacer-${index}`} bet={bet} />
+            ))}
+            {filteredTotalBets.map((bet, index) => (
+              <CompletedBet key={`spacer-${index}`} bet={bet} />
+            ))}
+          </View>
         </ScrollView>
+        {/* </View> */}
       </View>
     </SafeAreaView>
   );
@@ -468,6 +479,12 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     flex: 1,
+  },
+  betsContainer: {
+    gap: 12,
+    flexDirection: "row", // lays them out horizontally
+    flexWrap: "wrap", // allows them to wrap to the next line
+    justifyContent: "flex-start", // optional, controls alignment
   },
   betCard: {
     borderRadius: 12,

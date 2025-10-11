@@ -51,18 +51,18 @@ export default function TeamBet({ teamBet }: Props) {
           style={[styles.pickBadge, { backgroundColor: colors.gameScheduled }]}
         >
           <Text style={styles.pickText}>
-            {teamBet.pick.toUpperCase() + " ML"}
+            {`${teamBet.pick.toUpperCase()} ML (${teamBet.odds > 0 ? "+" : ""}${teamBet.odds})`}
           </Text>
         </View>
       </View>
 
       <Matchup game={getGame(teamBet.gameId)} />
 
-      <View style={styles.betDetails}>
+      {/* <View style={styles.betDetails}>
         <Text style={[styles.betLabel, { color: colors.secondaryText }]}>
           Odds: {teamBet.odds > 0 ? "+" : ""} {teamBet.odds}
         </Text>
-      </View>
+      </View> */}
 
       <Text style={[styles.timeText, { color: colors.tertiaryText }]}>
         {teamBet.dateTime.toLocaleTimeString("en-US", {

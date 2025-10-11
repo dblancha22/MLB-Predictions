@@ -1,24 +1,23 @@
-import { useTheme } from "@/contexts/ThemeContext";
-import { BetOnTotal } from "@/schema/BetTypes";
 import React, { useCallback } from "react";
-
-import { View, StyleSheet, Text } from "react-native";
+import { useTheme } from "@/contexts/ThemeContext";
+import { BetOnTeam, BetOnTotal } from "@/schema/BetTypes";
+import { StyleSheet, View, Text } from "react-native";
 import Matchup from "./Matchup";
 import { BaseballGame, getTodayDate } from "@/schema/BaseballGame";
 
-interface Props {
-  totalBet: BetOnTotal;
-}
-
-export default function TotalBet({ totalBet }: Props) {
+export default function CompletedBet({ bet }: { bet: BetOnTeam | BetOnTotal }) {
   const { colors } = useTheme();
+
+  const isTeamBet = (bet: BetOnTeam | BetOnTotal): boolean => {
+    return !("total" in bet);
+  };
 
   const getGame = useCallback((gameId: string): BaseballGame => {
     // TODO get game info
     const game: BaseballGame = {
       id: gameId,
       gameMetadata: {
-        status: "scheduled",
+        status: "final",
         dateTime: getTodayDate(19, 5),
         venue: "Yankee Stadium",
         homeTeam: "Yankees",
@@ -36,43 +35,64 @@ export default function TotalBet({ totalBet }: Props) {
         awayTeam: "Red Sox",
         awayPitcher: "Chris Sale",
       },
-      gameRealTimeData: {},
+      gameRealTimeData: {
+        homeScore: 5,
+        awayScore: 4,
+        inning: 9,
+        inningHalf: "bottom",
+        balls: 0,
+        strikes: 2,
+        outs: 3,
+      },
     };
     return game;
   }, []);
 
   return (
     <View
-      key={`total-${totalBet.gameId}`}
-      style={[styles.betCard, { backgroundColor: colors.cardBackground }]}
+      key={`team-${bet.gameId}`}
+      style={[
+        styles.betCard,
+        {
+          backgroundColor:
+            bet.result?.outcome === "win"
+              ? colors.cardBackgroundWin
+              : colors.cardBackgroundLoss,
+        },
+      ]}
     >
       <View style={styles.betHeader}>
         <View
           style={[styles.pickBadge, { backgroundColor: colors.gameScheduled }]}
         >
           <Text style={styles.pickText}>
-            {`${totalBet.pick.toUpperCase()} ${totalBet.total} (${totalBet.odds > 0 ? "+" : ""}${totalBet.odds})`}
+            {`${bet.pick.toUpperCase()}${isTeamBet(bet) ? " ML " : " "}(${bet.odds > 0 ? "+" : ""}${bet.odds})`}
           </Text>
         </View>
       </View>
 
-      <Matchup game={getGame(totalBet.gameId)} />
+      <Matchup game={getGame(bet.gameId)} />
 
       {/* <View style={styles.betDetails}>
-        <Text style={[styles.betLabel, { color: colors.secondaryText }]}>
-          Odds: {totalBet.odds > 0 ? "+" : ""} {totalBet.odds}
-        </Text>
-      </View> */}
+          <Text style={[styles.betLabel, { color: colors.secondaryText }]}>
+            Odds: {teamBet.odds > 0 ? "+" : ""} {teamBet.odds}
+          </Text>
+        </View> */}
 
-      <Text style={[styles.timeText, { color: colors.tertiaryText }]}>
-        {totalBet.dateTime.toLocaleTimeString("en-US", {
+      {/* <Text style={[styles.timeText, { color: colors.tertiaryText }]}>
+        {bet.dateTime.toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
         })}
-      </Text>
+      </Text> */}
     </View>
   );
+  //   return isTeamBet(bet) ? (
+  //     <TeamBet teamBet={bet} />
+  //   ) : (
+  //     <TotalBet totalBet={bet as BetOnTotal} />
+  //   );
 }
 
 const styles = StyleSheet.create({

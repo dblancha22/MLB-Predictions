@@ -18,6 +18,8 @@ interface ThemeColors {
   // UI colors
   cardBackground: string;
   cardBorder: string;
+  cardBackgroundWin: string;
+  cardBackgroundLoss: string;
   secondaryText: string;
   tertiaryText: string;
 
@@ -55,6 +57,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     // UI colors
     cardBackground: useThemeColor({}, "cardBackground"),
     cardBorder: useThemeColor({}, "cardBorder"),
+    cardBackgroundWin: useThemeColor({}, "cardBackgroundWin"),
+    cardBackgroundLoss: useThemeColor({}, "cardBackgroundLoss"),
     secondaryText: useThemeColor({}, "secondaryText"),
     tertiaryText: useThemeColor({}, "tertiaryText"),
 
