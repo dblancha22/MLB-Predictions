@@ -26,6 +26,33 @@ export interface BaseballGame {
     awayPitcher?: string;
   };
   gameRealTimeData: RealTimeGameData;
+  picks?: (GameBetOnTeam | GameBetOnTotal)[];
+}
+
+export interface GameBetOnTeam {
+  pick: string;
+  odds: number;
+  result?: {
+    outcome: "win" | "loss";
+    finalScore: {
+      home: number;
+      away: number;
+    };
+  };
+}
+
+export interface GameBetOnTotal {
+  pick: "over" | "under";
+  total: number;
+  odds: number;
+  result?: {
+    outcome: "win" | "loss";
+    // actualTotal: number;
+    finalScore: {
+      home: number;
+      away: number;
+    };
+  };
 }
 
 export interface RealTimeGameData {
@@ -69,7 +96,7 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
       id: "1",
       gameMetadata: {
         status: "scheduled",
-        dateTime: getTodayDate(19, 5),
+        dateTime: getTodayDate(22, 5),
         venue: "Yankee Stadium",
         homeTeam: "Yankees",
         awayTeam: "Red Sox",
@@ -149,6 +176,62 @@ export const mockGamesData: Record<string, BaseballGame[]> = {
         strikes: 2,
         outs: 3,
       },
+      picks: [
+        {
+          pick: "Cubs",
+          odds: -110,
+          result: {
+            outcome: "win",
+            finalScore: { home: 5, away: 4 },
+          },
+        },
+        {
+          pick: "over",
+          total: 8.5,
+          odds: 105,
+          result: {
+            outcome: "win",
+            finalScore: { home: 5, away: 4 },
+          },
+        },
+      ],
+    },
+    {
+      id: "3",
+      gameMetadata: {
+        status: "final",
+        dateTime: getTodayDate(14, 20),
+        venue: "Wrigley Field",
+        homeTeam: "Cubs",
+        awayTeam: "Cardinals",
+        odds: {
+          spread: { home: -1.0, away: 1.0 },
+          moneyline: { home: -110, away: -110 },
+        },
+      },
+      homeTeamData: {
+        homeTeam: "Cubs",
+        homePitcher: "Marcus Stroman",
+      },
+      awayTeamData: {
+        awayTeam: "Cardinals",
+        awayPitcher: "Adam Wainwright",
+      },
+      gameRealTimeData: {
+        homeScore: 5,
+        awayScore: 4,
+        inning: 9,
+        inningHalf: "bottom",
+        balls: 0,
+        strikes: 2,
+        outs: 3,
+      },
+      picks: [
+        {
+          pick: "Cubs",
+          odds: -110,
+        },
+      ],
     },
   ],
   [getTomorrowString()]: [

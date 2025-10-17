@@ -1,21 +1,21 @@
-import React, { useState } from "react";
-import {
-  Text,
-  StyleSheet,
-  View,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native";
-import { mockGamesData, RealTimeGameData } from "@/schema/BaseballGame";
-import {
-  mockBetOnTeamData,
-  mockBetOnTotalData,
-  BetOnTeam,
-  BetOnTotal,
-} from "@/schema/BetTypes";
-import { useTheme } from "@/contexts/ThemeContext";
 import TeamBet from "@/components/TeamBet";
 import TotalBet from "@/components/TotalBet";
+import { useTheme } from "@/contexts/ThemeContext";
+import { mockGamesData, RealTimeGameData } from "@/schema/BaseballGame";
+import {
+  BetOnTeam,
+  BetOnTotal,
+  mockBetOnTeamData,
+  mockBetOnTotalData,
+} from "@/schema/BetTypes";
+import React, { useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 export default function BestBets() {
   const [selectedDate, setSelectedDate] = useState(
@@ -118,6 +118,10 @@ export default function BestBets() {
           style={styles.dateScrollView}
           contentContainerStyle={styles.dateScrollContent}
         >
+          {/* TODO: have Yesterday and Today
+            - Today will be some type of "Check back at 8am" or something like that
+            - Center date selector
+          */}
           {getAvailableDates().map((dateString) => (
             <TouchableOpacity
               key={dateString}
@@ -147,6 +151,7 @@ export default function BestBets() {
 
       <>
         <ScrollView style={styles.mainScrollView}>
+          {/* TODO: Organize by Game, then each bet for a game as tiles in that section */}
           {/* Team Bets Section */}
           <View style={styles.betSection}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -186,247 +191,6 @@ export default function BestBets() {
                   style={[styles.noBetsText, { color: colors.secondaryText }]}
                 >
                   No total bets for this date
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Games Section */}
-          <View style={styles.betSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Games - {getDisplayDate(selectedDate)}
-            </Text>
-            {currentGames.length > 0 ? (
-              <View style={styles.gamesContainer}>
-                {currentGames.map((game) => (
-                  <View
-                    key={game.id}
-                    style={[
-                      styles.gameRow,
-                      { backgroundColor: colors.cardBackground },
-                    ]}
-                  >
-                    <View style={styles.teamInfo}>
-                      <View style={styles.teamVsRow}>
-                        <View style={styles.teamContainer}>
-                          <Text
-                            style={[styles.teamName, { color: colors.text }]}
-                          >
-                            {game.gameMetadata.homeTeam}
-                          </Text>
-                          <Text style={styles.score}>
-                            {game.gameMetadata.status === "scheduled"
-                              ? ""
-                              : game.gameRealTimeData.homeScore || 0}
-                          </Text>
-                          {game.homeTeamData.homePitcher && (
-                            <Text
-                              style={[
-                                styles.pitcherName,
-                                { color: colors.tertiaryText },
-                              ]}
-                            >
-                              {game.homeTeamData.homePitcher}
-                            </Text>
-                          )}
-                        </View>
-                        <Text
-                          style={[
-                            styles.vsText,
-                            { color: colors.secondaryText },
-                          ]}
-                        >
-                          vs.
-                        </Text>
-                        <View style={styles.teamContainer}>
-                          <Text
-                            style={[styles.teamName, { color: colors.text }]}
-                          >
-                            {game.gameMetadata.awayTeam}
-                          </Text>
-                          <Text style={styles.score}>
-                            {game.gameMetadata.status === "scheduled"
-                              ? ""
-                              : game.gameRealTimeData.awayScore || 0}
-                          </Text>
-                          {game.awayTeamData.awayPitcher && (
-                            <Text
-                              style={[
-                                styles.pitcherName,
-                                { color: colors.tertiaryText },
-                              ]}
-                            >
-                              {game.awayTeamData.awayPitcher}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={styles.gameInfo}>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          {
-                            backgroundColor: getStatusColor(
-                              game.gameMetadata.status,
-                            ),
-                          },
-                        ]}
-                      >
-                        <Text style={styles.statusText}>
-                          {game.gameMetadata.status.toUpperCase()}
-                        </Text>
-                      </View>
-                      <Text
-                        style={[
-                          styles.timeText,
-                          { color: colors.secondaryText },
-                        ]}
-                      >
-                        {formatGameTime(
-                          game.gameMetadata.dateTime,
-                          game.gameMetadata.status,
-                          game.gameRealTimeData,
-                        )}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.venueText,
-                          { color: colors.tertiaryText },
-                        ]}
-                      >
-                        {game.gameMetadata.venue}
-                      </Text>
-                      {game.gameMetadata.status === "live" &&
-                        game.gameRealTimeData && (
-                          <View style={styles.realtimeContainer}>
-                            {game.gameRealTimeData.balls !== undefined &&
-                              game.gameRealTimeData.strikes !== undefined && (
-                                <Text
-                                  style={[
-                                    styles.realtimeText,
-                                    { color: colors.secondaryText },
-                                  ]}
-                                >
-                                  Count: {game.gameRealTimeData.balls}-
-                                  {game.gameRealTimeData.strikes}
-                                </Text>
-                              )}
-                            {game.gameRealTimeData.outs !== undefined && (
-                              <Text
-                                style={[
-                                  styles.realtimeText,
-                                  { color: colors.secondaryText },
-                                ]}
-                              >
-                                Outs: {game.gameRealTimeData.outs}
-                              </Text>
-                            )}
-                          </View>
-                        )}
-                      {game.gameMetadata.odds && (
-                        <View style={styles.oddsContainer}>
-                          {game.gameMetadata.odds.spread && (
-                            <View style={styles.oddsRow}>
-                              <Text
-                                style={[
-                                  styles.oddsLabel,
-                                  { color: colors.secondaryText },
-                                ]}
-                              >
-                                Spread:
-                              </Text>
-                              <View style={styles.oddsValues}>
-                                <Text
-                                  style={[
-                                    styles.oddsValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {game.gameMetadata.odds.spread.home > 0
-                                    ? "+"
-                                    : ""}
-                                  {game.gameMetadata.odds.spread.home}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.oddsSeparator,
-                                    { color: colors.tertiaryText },
-                                  ]}
-                                >
-                                  |
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.oddsValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {game.gameMetadata.odds.spread.away > 0
-                                    ? "+"
-                                    : ""}
-                                  {game.gameMetadata.odds.spread.away}
-                                </Text>
-                              </View>
-                            </View>
-                          )}
-                          {game.gameMetadata.odds.moneyline && (
-                            <View style={styles.oddsRow}>
-                              <Text
-                                style={[
-                                  styles.oddsLabel,
-                                  { color: colors.secondaryText },
-                                ]}
-                              >
-                                Moneyline:
-                              </Text>
-                              <View style={styles.oddsValues}>
-                                <Text
-                                  style={[
-                                    styles.oddsValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {game.gameMetadata.odds.moneyline.home > 0
-                                    ? "+"
-                                    : ""}
-                                  {game.gameMetadata.odds.moneyline.home}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.oddsSeparator,
-                                    { color: colors.tertiaryText },
-                                  ]}
-                                >
-                                  |
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.oddsValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {game.gameMetadata.odds.moneyline.away > 0
-                                    ? "+"
-                                    : ""}
-                                  {game.gameMetadata.odds.moneyline.away}
-                                </Text>
-                              </View>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View style={styles.noGamesContainer}>
-                <Text
-                  style={[styles.noGamesText, { color: colors.secondaryText }]}
-                >
-                  No games scheduled for this date
                 </Text>
               </View>
             )}

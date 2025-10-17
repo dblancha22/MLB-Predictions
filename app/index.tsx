@@ -1,14 +1,14 @@
+import Matchup from "@/components/Matchup";
+import { useTheme } from "@/contexts/ThemeContext";
+import { mockGamesData, RealTimeGameData } from "@/schema/BaseballGame";
 import React, { useState } from "react";
 import {
-  Text,
-  StyleSheet,
-  View,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { mockGamesData, RealTimeGameData } from "@/schema/BaseballGame";
-import { useTheme } from "@/contexts/ThemeContext";
-import Matchup from "@/components/Matchup";
 
 export default function Index() {
   const [selectedDate, setSelectedDate] = useState(
@@ -156,20 +156,6 @@ export default function Index() {
                 <Matchup game={game} />
 
                 <View style={styles.gameInfo}>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      {
-                        backgroundColor: getStatusColor(
-                          game.gameMetadata.status,
-                        ),
-                      },
-                    ]}
-                  >
-                    <Text style={styles.statusText}>
-                      {game.gameMetadata.status.toUpperCase()}
-                    </Text>
-                  </View>
                   <Text
                     style={[styles.timeText, { color: colors.secondaryText }]}
                   >
@@ -215,87 +201,37 @@ export default function Index() {
                     )}
 
                   {/* Odds Section */}
-                  {game.gameMetadata.odds && (
-                    <View style={styles.oddsContainer}>
-                      {/* Spread */}
-                      {game.gameMetadata.odds.spread && (
-                        <View style={styles.oddsRow}>
-                          <Text
-                            style={[
-                              styles.oddsLabel,
-                              { color: colors.secondaryText },
-                            ]}
-                          >
-                            Spread:
-                          </Text>
-                          <View style={styles.oddsValues}>
-                            <Text
-                              style={[styles.oddsValue, { color: colors.text }]}
-                            >
-                              {game.gameMetadata.odds.spread.home > 0
-                                ? "+"
-                                : ""}
-                              {game.gameMetadata.odds.spread.home}
-                            </Text>
-                            <Text
+                  {game.picks && game.picks.length > 0 ? (
+                    <View style={styles.betSection}>
+                      <View style={styles.betsContainer}>
+                        {game.picks.map((bet, index) => (
+                          <View key={index} style={styles.betHeader}>
+                            <View
                               style={[
-                                styles.oddsSeparator,
-                                { color: colors.tertiaryText },
+                                styles.pickBadge,
+                                { backgroundColor: colors.gameScheduled },
                               ]}
                             >
-                              |
-                            </Text>
-                            <Text
-                              style={[styles.oddsValue, { color: colors.text }]}
-                            >
-                              {game.gameMetadata.odds.spread.away > 0
-                                ? "+"
-                                : ""}
-                              {game.gameMetadata.odds.spread.away}
-                            </Text>
+                              <Text style={styles.pickText}>
+                                {`${bet.pick.toUpperCase()} ML (${bet.odds > 0 ? "+" : ""}${bet.odds})`}
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                      )}
-
-                      {/* Moneyline */}
-                      {game.gameMetadata.odds.moneyline && (
-                        <View style={styles.oddsRow}>
-                          <Text
-                            style={[
-                              styles.oddsLabel,
-                              { color: colors.secondaryText },
-                            ]}
-                          >
-                            Moneyline:
-                          </Text>
-                          <View style={styles.oddsValues}>
-                            <Text
-                              style={[styles.oddsValue, { color: colors.text }]}
-                            >
-                              {game.gameMetadata.odds.moneyline.home > 0
-                                ? "+"
-                                : ""}
-                              {game.gameMetadata.odds.moneyline.home}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.oddsSeparator,
-                                { color: colors.tertiaryText },
-                              ]}
-                            >
-                              |
-                            </Text>
-                            <Text
-                              style={[styles.oddsValue, { color: colors.text }]}
-                            >
-                              {game.gameMetadata.odds.moneyline.away > 0
-                                ? "+"
-                                : ""}
-                              {game.gameMetadata.odds.moneyline.away}
-                            </Text>
-                          </View>
-                        </View>
-                      )}
+                        ))}
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.noBetsContainer}>
+                      <Text
+                        style={[
+                          styles.noBetsText,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        {game.gameMetadata.dateTime > new Date()
+                          ? "This game hasn't been predicted yet, check back later!"
+                          : "Stay away! No bets for this game."}
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -315,6 +251,48 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
+  betHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  pickBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pickText: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#fff",
+    alignContent: "center",
+  },
+  betSection: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+  betsContainer: {
+    gap: 12,
+    flexDirection: "row", // lays them out horizontally
+    flexWrap: "wrap", // allows them to wrap to the next line
+    justifyContent: "flex-start", // optional, controls alignment
+  },
+  noBetsContainer: {
+    padding: 20,
+    alignItems: "center",
+  },
+  noBetsText: {
+    fontSize: 14,
+    fontStyle: "italic",
+  },
   container: {
     flex: 1,
   },
@@ -364,6 +342,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    width: "40%",
   },
   teamInfo: {
     marginBottom: 12,

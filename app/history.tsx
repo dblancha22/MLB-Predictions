@@ -1,20 +1,20 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native";
-import { SafeAreaView } from "react-native";
+import CompletedBet from "@/components/CompletedBet";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
-  mockBetOnTeamData,
-  mockBetOnTotalData,
   BetOnTeam,
   BetOnTotal,
+  mockBetOnTeamData,
+  mockBetOnTotalData,
 } from "@/schema/BetTypes";
-import CompletedBet from "@/components/CompletedBet";
+import React, { useState } from "react";
+import {
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 export default function History() {
   const { colors } = useTheme();
@@ -247,6 +247,9 @@ export default function History() {
             Overall Record
           </Text>
           <View style={styles.statsRow}>
+            {/* TODO: Add tracker for units won i.e. 4.3x or 430% 
+              Do we need to track wins/losses?
+            */}
             <View style={styles.statItem}>
               <Text style={[styles.statNumber, { color: "#4CAF50" }]}>
                 {overallStats.wins}

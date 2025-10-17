@@ -1,10 +1,10 @@
 import React, { useCallback } from "react";
 
-import { BetOnTeam } from "@/schema/BetTypes";
-import { Text, View, StyleSheet } from "react-native";
 import { useTheme } from "@/contexts/ThemeContext";
-import Matchup from "./Matchup";
 import { BaseballGame, getTodayDate } from "@/schema/BaseballGame";
+import { BetOnTeam } from "@/schema/BetTypes";
+import { StyleSheet, Text, View } from "react-native";
+import Matchup from "./Matchup";
 
 interface Props {
   teamBet: BetOnTeam;
@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
-    width: 400,
+    width: "25%",
     alignItems: "center",
   },
   betHeader: {

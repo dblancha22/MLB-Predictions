@@ -1,7 +1,7 @@
 import { useTheme } from "@/contexts/ThemeContext";
 import { BaseballGame } from "@/schema/BaseballGame";
 import React from "react";
-import { Text, View, StyleSheet } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 interface Props {
   game: BaseballGame;
@@ -15,24 +15,6 @@ export default function Matchup({ game }: Props) {
       <View style={styles.teamVsRow}>
         <View style={styles.teamContainer}>
           <Text style={[styles.teamName, { color: colors.text }]}>
-            {game.gameMetadata.homeTeam}
-          </Text>
-          <Text style={styles.score}>
-            {game.gameMetadata.status === "scheduled"
-              ? ""
-              : game.gameRealTimeData.homeScore || 0}
-          </Text>
-          {game.homeTeamData.homePitcher && (
-            <Text style={[styles.pitcherName, { color: colors.tertiaryText }]}>
-              {game.homeTeamData.homePitcher}
-            </Text>
-          )}
-        </View>
-        <Text style={[styles.vsText, { color: colors.secondaryText }]}>
-          vs.
-        </Text>
-        <View style={styles.teamContainer}>
-          <Text style={[styles.teamName, { color: colors.text }]}>
             {game.gameMetadata.awayTeam}
           </Text>
           <Text style={styles.score}>
@@ -43,6 +25,22 @@ export default function Matchup({ game }: Props) {
           {game.awayTeamData.awayPitcher && (
             <Text style={[styles.pitcherName, { color: colors.tertiaryText }]}>
               {game.awayTeamData.awayPitcher}
+            </Text>
+          )}
+        </View>
+        <Text style={[styles.vsText, { color: colors.secondaryText }]}>at</Text>
+        <View style={styles.teamContainer}>
+          <Text style={[styles.teamName, { color: colors.text }]}>
+            {game.gameMetadata.homeTeam}
+          </Text>
+          <Text style={styles.score}>
+            {game.gameMetadata.status === "scheduled"
+              ? ""
+              : game.gameRealTimeData.homeScore || 0}
+          </Text>
+          {game.homeTeamData.homePitcher && (
+            <Text style={[styles.pitcherName, { color: colors.tertiaryText }]}>
+              {game.homeTeamData.homePitcher}
             </Text>
           )}
         </View>
