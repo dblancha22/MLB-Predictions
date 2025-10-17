@@ -1,13 +1,13 @@
+import { useTheme } from "@/contexts/ThemeContext";
+import { usePathname, useRouter } from "expo-router";
 import React from "react";
 import {
-  View,
+  Platform,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  StyleSheet,
-  Platform,
+  View,
 } from "react-native";
-import { useRouter, usePathname } from "expo-router";
-import { useTheme } from "@/contexts/ThemeContext";
 
 interface NavigationItem {
   name: string;
@@ -43,7 +43,9 @@ export function NavigationHeader() {
         },
       ]}
     >
-      <Text style={[styles.title, { color: colors.text }]}>NoMoreTickets</Text>
+      <Text style={[styles.title, { color: colors.text }]}>
+        Responsible Gambling
+      </Text>
       <View style={styles.navigationContainer}>
         {navigationItems.map((item) => (
           <TouchableOpacity
