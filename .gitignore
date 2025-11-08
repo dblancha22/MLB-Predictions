@@ -1,0 +1,51 @@
+# ==========================
+# Backend (Node.js + TS)
+# ==========================
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/*.log
+backend/*.tsbuildinfo
+
+# ==========================
+# Frontend (Expo / React Native)
+# ==========================
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/expo-env.d.ts
+mobile/.env
+mobile/*.log
+mobile/*.tsbuildinfo
+
+# ==========================
+# Native / iOS / Android
+# ==========================
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+
+# ==========================
+# macOS / OS files
+# ==========================
+.DS_Store
+*.pem
+Thumbs.db
+ehthumbs.db
+
+# ==========================
+# Debug / npm / yarn
+# ==========================
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# ==========================
+# Example / template files
+# ==========================
+app-example

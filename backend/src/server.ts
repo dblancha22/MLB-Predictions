@@ -12,6 +12,7 @@ if (!connectionString) {
 // Create Postgres client
 const sqlClient = postgres(connectionString, {
   ssl: "require", // Supabase requires SSL
+  prepare: false,
 });
 
 // Create Drizzle instance
