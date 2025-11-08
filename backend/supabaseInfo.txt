@@ -1,0 +1,3 @@
+satras-8kiphi-hezqAz
+
+DATABASE_URL=postgresql://postgres.mpwpkdyqrpvciyptrkuq:satras-8kiphi-hezqAz@aws-1-us-east-2.pooler.supabase.com:5432/postgres
