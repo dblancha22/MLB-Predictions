@@ -2,11 +2,11 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { usePathname, useRouter } from "expo-router";
 import React from "react";
 import {
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 interface NavigationItem {

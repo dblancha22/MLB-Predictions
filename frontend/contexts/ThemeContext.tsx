@@ -1,5 +1,5 @@
-import React, { createContext, useContext, ReactNode } from "react";
 import { useThemeColor } from "@/hooks/useThemeColor";
+import React, { createContext, ReactNode, useContext } from "react";
 
 interface ThemeColors {
   // Base colors
