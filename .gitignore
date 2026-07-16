@@ -1,3 +1,11 @@
+.env
+out/
+
+# Python ingestion
+.venv/
+__pycache__/
+*.py[cod]
+
 # ==========================
 # Backend (Node.js + TS)
 # ==========================
