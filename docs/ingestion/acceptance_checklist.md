@@ -15,6 +15,9 @@ Use this checklist before considering a raw ingestion script ready.
 - Credentials are read from environment variables or local secret files, not hardcoded.
 - Credentials point to the intended Supabase project before running.
 - Service-role credentials are never exposed to frontend/client code.
+- Ingestion runs from a project-local virtual environment installed from the
+  fully pinned `requirements-ingestion.txt`; `supabase-py` is not installed as
+  an unpinned global dependency.
 - The command supports a single date.
 - The command supports a date range before broad backfills.
 - The routine results/log invocation targets only the previous calendar day.
@@ -29,6 +32,19 @@ Use this checklist before considering a raw ingestion script ready.
 - Missing optional data does not crash the whole run.
 - Partial failures can be retried.
 - Logs identify the date, game, table, and source involved in failures.
+
+## Shared Postgame Workflow
+
+- `--yesterday` resolves through an explicit logged IANA timezone and defaults
+  to `America/Los_Angeles`.
+- Timezone selection affects only date resolution, not MLB official dates or
+  stored UTC timestamps.
+- The three postgame stages share one schedule payload per bounded date chunk.
+- Team and pitcher transforms share one boxscore payload per unique `gamePk`.
+- In-memory cache state is discarded after the command exits.
+- Physical MLB request and cache-hit totals are logged.
+- A failed games stage skips dependent stages for that date.
+- Existing table-specific commands remain usable for targeted recovery.
 
 ## Current Raw Tables
 

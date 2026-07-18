@@ -8,9 +8,15 @@ This project should treat the existing notebook as a modeling prototype, not as 
 - Ignore `frontend/` and `backend/` for current ingestion planning.
 - Focus only on scripts that populate raw Supabase tables.
 - Do not build derived stats, feature tables, model-training tables, or prediction tables yet.
-- The routine morning `games_raw` workflow ingests only the previous calendar
-  day's schedule/results. Date ranges remain available for historical backfills
-  and recovery runs.
+- The routine morning postgame workflow uses `scripts/ingest_postgame.py` to
+  ingest only the previous calendar day's `games_raw`, `team_game_logs`, and
+  `pitcher_game_logs` data in dependency order. Date ranges remain available
+  for historical backfills and recovery runs.
+- The orchestrator shares one schedule payload per bounded date chunk and one
+  boxscore per unique final `gamePk`. Preserve its run-scoped response cache and
+  physical-request metrics when changing postgame ingestion.
+- Keep `scripts/ingest_games_raw.py`, `scripts/ingest_team_game_logs.py`, and
+  `scripts/ingest_pitcher_game_logs.py` usable as targeted recovery commands.
 - Upcoming games are not routinely written to `games_raw`.
   `scripts/ingest_probable_pitchers.py` is the separately documented pregame
   workflow: it synchronizes only MLB `Preview` assignments without creating
@@ -65,8 +71,12 @@ Responsibilities:
 
 - Maintain `docs/ingestion/raw_data_plan.md`.
 - Define ingestion order, idempotency rules, and update windows.
-- Keep the previous-day `games_raw` results job separate from the
-  `ingest_probable_pitchers.py` pregame job.
+- Keep the previous-day `ingest_postgame.py` results/log workflow separate from
+  the `ingest_probable_pitchers.py` pregame job.
+- Maintain the shared request budget: one schedule response per bounded chunk
+  and one boxscore response per unique final game in a process run.
+- Preserve dependency ordering: `games_raw`, then `team_game_logs`, then
+  `pitcher_game_logs` and its processed marker.
 - Avoid model leakage concerns later by labeling data timing now.
 - Keep scripts narrow, testable, and resumable.
 
@@ -75,6 +85,7 @@ Key questions this agent answers:
 - What should the previous-day morning run do?
 - What should a postgame/yesterday update do?
 - How do we safely rerun the same date?
+- Does a change preserve shared-payload reuse and request-count observability?
 - Which tables should be populated in the first implementation slice?
 
 ## Collaboration Rules For Future Codex Work
@@ -88,6 +99,8 @@ Before creating or editing ingestion scripts:
 5. Inspect the notebook only as reference behavior.
 6. Confirm whether any proposed schema changes are necessary.
 7. Do not implement scraping as an ingestion strategy.
+8. Use `scripts/ingest_postgame.py` for routine previous-day validation and the
+   table-specific commands only for targeted recovery or isolated testing.
 
 For each new raw table or source:
 

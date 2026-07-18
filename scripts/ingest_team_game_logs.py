@@ -1,130 +1,51 @@
 #!/usr/bin/env python3
-"""Ingest final MLB team batting totals into Supabase team_game_logs.
-
-This writer is intentionally standalone. Shared ingestion utilities can be
-extracted after both this script and ingest_games_raw.py are stable.
-"""
+"""Ingest final MLB team batting totals into Supabase team_game_logs."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 import sys
-import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse, urlunparse
-from urllib.request import Request, urlopen
+
+try:
+    from scripts.ingestion.common import (
+        DEFAULT_ENV_FILE,
+        IngestionError,
+        build_date_range,
+        create_supabase_client,
+        normalize_supabase_url,
+        parse_iso_date,
+        validate_runtime_options,
+    )
+    from scripts.ingestion.mlb import request_json
+except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
+    from ingestion.common import (  # type: ignore[no-redef]
+        DEFAULT_ENV_FILE,
+        IngestionError,
+        build_date_range,
+        create_supabase_client,
+        normalize_supabase_url,
+        parse_iso_date,
+        validate_runtime_options,
+    )
+    from ingestion.mlb import request_json  # type: ignore[no-redef]
 
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 MLB_BOXSCORE_URL = "https://statsapi.mlb.com/api/v1/game/{game_id}/boxscore"
-EXPECTED_SUPABASE_PROJECT_REF = "soakgdpuvtxadjextekg"
-DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 FINAL_STATUS_CODE = "F"
 FINAL_CODED_GAME_STATE = "F"
 
 LOGGER = logging.getLogger("ingest_team_game_logs")
 
 
-class IngestionError(RuntimeError):
-    """Raised when source data or configuration cannot be safely ingested."""
-
-
-def load_env_file(path: Path) -> None:
-    """Load simple KEY=VALUE entries without overwriting process variables."""
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
-def normalize_supabase_url(value: str) -> str:
-    parsed = urlparse(value.strip().rstrip("/"))
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise IngestionError("SUPABASE_URL must be a valid HTTPS project URL")
-    normalized_path = parsed.path.rstrip("/")
-    if normalized_path not in {"", "/rest/v1"}:
-        raise IngestionError(
-            "SUPABASE_URL must be the project base URL or end with /rest/v1"
-        )
-    return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
-
-
-def parse_iso_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid date {value!r}; expected YYYY-MM-DD"
-        ) from exc
-
-
-def build_date_range(
-    single_date: Optional[date], start_date: Optional[date], end_date: Optional[date]
-) -> List[date]:
-    if single_date is not None:
-        if start_date is not None or end_date is not None:
-            raise IngestionError("--date cannot be combined with a date range")
-        return [single_date]
-    if start_date is None or end_date is None:
-        raise IngestionError("provide --date or both --start-date and --end-date")
-    if start_date > end_date:
-        raise IngestionError("--start-date must be on or before --end-date")
-    return [
-        start_date + timedelta(days=offset)
-        for offset in range((end_date - start_date).days + 1)
-    ]
-
-
 def _request_json(
     url: str, params: Mapping[str, Any], timeout: float, retries: int
 ) -> Dict[str, Any]:
-    request_url = f"{url}?{urlencode(params)}" if params else url
-    request = Request(
-        request_url,
-        headers={"Accept": "application/json", "User-Agent": "MLB-Predictions-ingestion/1.0"},
-    )
-    for attempt in range(retries + 1):
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                if not 200 <= response.status < 300:
-                    raise IngestionError(
-                        f"MLB Stats API returned HTTP {response.status} for {request_url}"
-                    )
-                payload = json.load(response)
-                if not isinstance(payload, dict):
-                    raise IngestionError("MLB Stats API response was not a JSON object")
-                return payload
-        except HTTPError as exc:
-            retryable = exc.code == 429 or 500 <= exc.code < 600
-            if not retryable or attempt >= retries:
-                raise IngestionError(
-                    f"MLB Stats API returned HTTP {exc.code} for {request_url}"
-                ) from exc
-        except (URLError, TimeoutError) as exc:
-            if attempt >= retries:
-                raise IngestionError(
-                    f"MLB Stats API request failed for {request_url}: {exc}"
-                ) from exc
-        delay = 2**attempt
-        LOGGER.warning("MLB request failed; retrying in %s second(s)", delay)
-        time.sleep(delay)
-    raise AssertionError("retry loop exited unexpectedly")
+    return request_json(url, params, timeout, retries, LOGGER)
 
 
 def fetch_schedule(
@@ -251,35 +172,6 @@ def transform_team_game_rows(
     return rows
 
 
-def create_supabase_client(env_file: Path):
-    load_env_file(env_file)
-    raw_url = os.getenv("SUPABASE_URL", "").strip()
-    secret_key = (
-        os.getenv("SUPABASE_SECRET_KEY", "").strip()
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    )
-    if not raw_url:
-        raise IngestionError("SUPABASE_URL is not set")
-    if not secret_key:
-        raise IngestionError(
-            "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is not set"
-        )
-    supabase_url = normalize_supabase_url(raw_url)
-    project_ref = (urlparse(supabase_url).hostname or "").split(".", 1)[0]
-    if project_ref != EXPECTED_SUPABASE_PROJECT_REF:
-        raise IngestionError(
-            "SUPABASE_URL does not point to the expected BagBrainOfficial project "
-            f"({EXPECTED_SUPABASE_PROJECT_REF})"
-        )
-    try:
-        from supabase import create_client
-    except ImportError as exc:
-        raise IngestionError(
-            "supabase-py is not installed; run: python -m pip install -r requirements-ingestion.txt"
-        ) from exc
-    return create_client(supabase_url, secret_key)
-
-
 def validate_dependencies(
     client: Any, rows: Sequence[Mapping[str, int]]
 ) -> Tuple[List[Dict[str, int]], List[int]]:
@@ -335,10 +227,16 @@ def ingest_date(
     dry_run: bool,
     timeout: float,
     retries: int,
+    schedule_payload: Optional[Mapping[str, Any]] = None,
+    boxscore_fetcher: Optional[Any] = None,
 ) -> Dict[str, int]:
-    schedule_games = flatten_schedule(
+    payload = (
         fetch_schedule(target_date, game_type, timeout, retries)
+        if schedule_payload is None
+        else schedule_payload
     )
+    schedule_games = flatten_schedule(payload)
+    get_boxscore = fetch_boxscore if boxscore_fetcher is None else boxscore_fetcher
     eligible_games = final_games(schedule_games)
     summary = {
         "games_found": len(schedule_games),
@@ -352,7 +250,7 @@ def ingest_date(
     for game in eligible_games:
         game_id = _required_int(game, "gamePk", "game")
         try:
-            boxscore = fetch_boxscore(game_id, timeout, retries)
+            boxscore = get_boxscore(game_id, timeout, retries)
             rows.extend(transform_team_game_rows(game, boxscore))
         except Exception as exc:
             summary["games_failed"] += 1
@@ -409,10 +307,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         dates = build_date_range(args.date, args.start_date, args.end_date)
-        if args.retries < 0:
-            raise IngestionError("--retries cannot be negative")
-        if args.timeout <= 0:
-            raise IngestionError("--timeout must be positive")
+        validate_runtime_options(args.timeout, args.retries)
         client = None if args.dry_run else create_supabase_client(args.env_file)
     except (IngestionError, ValueError) as exc:
         LOGGER.error("%s", exc)

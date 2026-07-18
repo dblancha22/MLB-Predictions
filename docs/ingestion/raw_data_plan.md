@@ -10,6 +10,29 @@ This plan covers only raw Supabase table population. It intentionally excludes d
 
 The notebook should remain unchanged.
 
+## Local Environment Setup
+
+Use a project-local virtual environment for ingestion commands. Do not install
+`supabase-py` globally or install it separately from the pinned dependency set.
+The repository ignores `.venv/`.
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-ingestion.txt
+```
+
+Run ingestion with the virtual-environment interpreter:
+
+```bash
+.venv/bin/python scripts/ingest_postgame.py --yesterday --dry-run
+.venv/bin/python scripts/ingest_postgame.py --yesterday
+```
+
+The remaining `python scripts/...` examples in this document assume the virtual
+environment has already been activated. The pinned requirements currently use
+`supabase==2.31.0`; update the full pinned requirements file together rather
+than upgrading only one Supabase package.
+
 ## First Implementation
 
 Implemented on 2026-07-14:
@@ -73,9 +96,10 @@ Implemented on 2026-07-14:
   also enforces foreign keys for `game_id`, `team_id`, and `opponent_id`.
 - It supports dry runs, one date, and inclusive date ranges. It does not modify
   `games_raw.pitcher_logs_processed`.
-- It remains standalone by decision; shared environment, date, request, and
-  retry utilities should be extracted only in a later regression-tested
-  refactor.
+- It remains available as a standalone recovery command, but now imports shared
+  environment, date, Supabase-client, and MLB request utilities. The routine
+  postgame orchestrator injects its shared schedule and boxscore payloads into
+  this writer.
 
 Commands:
 
@@ -186,32 +210,89 @@ Initial live validation completed on 2026-07-14:
   table contained 786 rows and 786 distinct `(game_id, team_id)` keys after the
   validation write.
 
+## Shared Postgame Orchestration
+
+Implemented on 2026-07-15:
+
+- `scripts/ingest_postgame.py` is the routine postgame entry point for
+  `games_raw`, `team_game_logs`, and `pitcher_game_logs`.
+- `--yesterday` resolves the prior calendar date in
+  `America/Los_Angeles` by default. This timezone selects the requested date;
+  it does not change MLB `officialDate` or UTC-normalized `gameDate` values.
+- One hydrated `/schedule` response is shared across all three stages. Date
+  ranges use bounded schedule requests and retain MLB's individual source-date
+  entries for postponement and resumption handling.
+- Each unique final `gamePk` boxscore is requested once per command run and the
+  same response is passed to both team- and pitcher-log transforms.
+- Successful responses and exhausted request failures are cached only in
+  process memory. The cache is discarded when the command exits, so a later
+  rerun refreshes MLB corrections.
+- Missing venue lookups use the same run-scoped client and remain conditional
+  on the venue not already existing in Supabase.
+- A failed `games_raw` stage prevents dependent log stages for that date. A
+  game-level log failure remains isolated, is reported, and produces a nonzero
+  final exit.
+- Existing table-specific scripts remain supported for targeted recovery.
+- The refactor adds no tables, migrations, or changes to raw-table keys.
+
+Commands:
+
+```bash
+python scripts/ingest_postgame.py --yesterday
+python scripts/ingest_postgame.py --date YYYY-MM-DD
+python scripts/ingest_postgame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+python scripts/ingest_postgame.py --yesterday --dry-run
+python scripts/ingest_postgame.py --date YYYY-MM-DD --steps team-logs,pitcher-logs
+```
+
+The default schedule chunk is seven days. `--schedule-chunk-days` may be used
+for a deliberately bounded recovery or backfill request.
+
+Live validation completed on 2026-07-15:
+
+- All 88 unit and orchestration tests passed.
+- `--yesterday --dry-run` and the live `--yesterday` command both resolved
+  `2026-07-14` in `America/Los_Angeles`, made one schedule request, handled the
+  All-Star-break no-game date successfully, and performed no table writes.
+- A `2026-07-12` dry run processed 15 final games with 16 physical MLB
+  requests: one schedule plus 15 unique boxscores. The pitcher stage reused all
+  15 boxscores from memory.
+- Two consecutive live `2026-07-12` runs produced the same successful summary:
+  15 `games_raw` upserts, 30 `team_game_logs` upserts, 143
+  `pitcher_game_logs` upserts, and 15 games marked processed, with zero date or
+  game failures. Existing primary/composite keys made the rerun convergent
+  without duplicate rows.
+
 ## Morning Workflow
 
-The routine morning `games_raw` job processes only the previous calendar day:
+The routine morning postgame job processes only the previous calendar day:
 
-1. Request yesterday's MLB schedule.
-2. Insert any missing team or venue identities referenced by those games.
-3. Upsert yesterday's games into `games_raw`, including final status and scores
+1. Run `python scripts/ingest_postgame.py --yesterday`.
+2. Request yesterday's MLB schedule once.
+3. Insert any missing team or venue identities referenced by those games.
+4. Upsert yesterday's games into `games_raw`, including final status and scores
    when MLB reports status code `F`.
+5. Request one boxscore for each unique postgame-safe final.
+6. Populate `team_game_logs` and `pitcher_game_logs` from shared boxscores.
+7. Mark pitcher logs processed after each complete pitcher row set writes.
 
 Do not routinely upsert today's or future games into `games_raw`. Inclusive date
 ranges are reserved for historical backfills, recovery, and explicit audits.
 The separately documented `probable_pitchers` workflow handles pregame pitcher
 assignments without changing this cadence.
 
-After the previous-day `games_raw` update succeeds, the routine team-log step
-should run `scripts/ingest_team_game_logs.py` for that same previous calendar
-day. A nonzero exit must be treated as an incomplete run and retried after the
-reported game-level failures are investigated.
+After the previous-day `games_raw` update succeeds, the orchestrator runs the
+team-log stage for that same previous calendar day. A nonzero exit must be
+treated as an incomplete run and retried after the reported failures are
+investigated. `scripts/ingest_team_game_logs.py` remains available for targeted
+recovery.
 
-The pitcher-log step should then run
-`scripts/ingest_pitcher_game_logs.py` for the same date. It refreshes all final
-games even when `pitcher_logs_processed` is already true, upserts every pitcher
-appearance, and marks each game processed only after its complete pitcher row
-set is written. A marker update receives bounded retries; a final marker failure
-leaves the idempotently written rows in place, reports the game incomplete, and
-causes a nonzero exit.
+The orchestrated pitcher-log stage then uses those same cached boxscores. It
+refreshes all final games even when `pitcher_logs_processed` is already true,
+upserts every pitcher appearance, and marks each game processed only after its
+complete pitcher row set is written. `scripts/ingest_pitcher_game_logs.py`
+remains available for recovery. A final marker failure leaves idempotently
+written rows in place and causes a nonzero exit.
 
 The probable-pitcher workflow is separate from this previous-day sequence. Run
 `scripts/ingest_probable_pitchers.py` for today's MLB schedule date, and refresh
@@ -263,18 +344,23 @@ Success criteria:
 - Pitcher logs include all pitchers, with starters marked by `is_starter`.
 - Rerunning a date updates rows without duplicates.
 
-Implementation sequencing decision on 2026-07-14:
+Historical implementation sequencing decision from 2026-07-14, completed and
+superseded by the shared orchestration refactor on 2026-07-15:
 
 1. Implement `team_game_logs` as a standalone writer first.
 2. Continue processing other games when one final boxscore fails, but report the
    failed game and exit nonzero so the incomplete run remains visible and safe
    to retry.
-3. Do not refactor shared code out of `ingest_games_raw.py` yet; document that as
-   a later simplification after both writers are stable.
+3. Defer shared-code extraction until the table-specific writers are stable.
 4. Validate a small live date and an idempotent rerun before beginning a bounded
    season-to-date backfill. Stop on unexplained discrepancies.
-5. Keep the pitcher writer standalone. Upsert and mark one game at a time so a
-   boxscore, dependency, write, or marker failure does not block other games.
+5. Preserve each table-specific command for recovery and keep pitcher writes
+   isolated by game so a boxscore, dependency, write, or marker failure does
+   not block other games.
+
+The deferred extraction is now complete. `scripts/ingest_postgame.py` is the
+routine entry point, while all three table-specific postgame commands remain
+supported for targeted recovery.
 
 ### Phase 3: Pregame Probable Pitchers
 

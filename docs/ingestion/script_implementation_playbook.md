@@ -28,6 +28,11 @@ Update these documents before or alongside implementation:
 - `raw_data_plan.md` for ordering, cadence, and idempotency
 - `data_timing_and_leakage.md` when field availability affects future modeling
 
+Run scripts and tests from a project-local virtual environment installed with
+the complete pinned `requirements-ingestion.txt`. Do not fix a missing
+`supabase-py` import by globally installing or independently upgrading that one
+package.
+
 ## 2. Inspect Live State And Probe The API
 
 Inspect the live Supabase table rather than relying only on repository notes:
@@ -75,6 +80,15 @@ Keep each script limited to raw ingestion. It should:
 - use documented primary keys for idempotent upserts
 - avoid erasing previously stored final or optional values with incomplete data
 - log the date, source, table action, skipped records, and summary counts
+
+When multiple table stages consume the same MLB payload in one workflow:
+
+- fetch the schedule once per bounded date chunk
+- fetch each canonical game's boxscore once
+- pass source payloads into table-specific transforms rather than refetching
+- use run-scoped memory caching as a guard against duplicate canonical IDs
+- report physical MLB requests and cache hits
+- keep table-specific commands usable for targeted recovery
 
 Treat repeated source occurrences carefully. Compare canonical IDs across dates,
 not only within one response. A postponed or resumed game may appear on more than

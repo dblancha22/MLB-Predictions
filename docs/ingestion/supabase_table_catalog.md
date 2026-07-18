@@ -149,7 +149,10 @@ Ingestion notes:
 
 - Populate from MLB Stats API `/schedule`.
 - Use MLB `gamePk` as `game_id`.
-- `scripts/ingest_games_raw.py` is the current writer.
+- `scripts/ingest_postgame.py` is the routine postgame orchestrator and invokes
+  the `games_raw` writer with a shared schedule payload.
+- `scripts/ingest_games_raw.py` remains the standalone writer for targeted
+  recovery.
 - `doubleheader_code` preserves MLB's `doubleHeader` source code rather than
   reducing traditional and split doubleheaders to one boolean value.
 - Store the requested MLB schedule date as `game_date` for ingested records.
@@ -164,8 +167,9 @@ Ingestion notes:
 - `games_raw` is not the routine source for today's or future matchups. The
   separate `ingest_probable_pitchers.py` pregame workflow does not create future
   `games_raw` rows.
-- `pitcher_logs_processed` is ingestion bookkeeping for the current
-  `scripts/ingest_pitcher_game_logs.py` job, not a modeling feature.
+- `pitcher_logs_processed` is ingestion bookkeeping for the pitcher-log stage
+  used by both `scripts/ingest_postgame.py` and the standalone
+  `scripts/ingest_pitcher_game_logs.py` command, not a modeling feature.
 
 ### `public.probable_pitchers`
 
@@ -258,7 +262,10 @@ Ingestion notes:
 
 - Populate after games are final.
 - Source: MLB Stats API `/game/{gamePk}/boxscore`.
-- `scripts/ingest_team_game_logs.py` is the current writer.
+- `scripts/ingest_postgame.py` is the routine entry point and passes its cached
+  boxscores into the team-log writer.
+- `scripts/ingest_team_game_logs.py` remains the standalone writer for targeted
+  recovery.
 - Upsert one row per team per game.
 - Should not be expected to exist for future scheduled games.
 - MLB `codedGameState=F` is the postgame eligibility signal used by this writer;
@@ -321,7 +328,10 @@ Ingestion notes:
   Retry a failed marker update with bounded backoff; if it still fails, report
   the game as incomplete and exit nonzero. Explicit recovery runs may refresh
   already-marked games.
-- `scripts/ingest_pitcher_game_logs.py` is the current writer.
+- `scripts/ingest_postgame.py` is the routine entry point and passes its cached
+  boxscores into the pitcher-log writer.
+- `scripts/ingest_pitcher_game_logs.py` remains the standalone writer for
+  targeted recovery.
 - The completed backfill audit found no duplicate keys, missing required stats,
   negative values, invalid game/team pairs, missing team coverage, or
   starter-count anomalies.

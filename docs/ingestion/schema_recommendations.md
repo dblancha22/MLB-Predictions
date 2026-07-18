@@ -180,11 +180,18 @@ no additional game index was required.
 
 ### Shared Ingestion Utilities
 
-The first `team_game_logs` writer will remain standalone and will not refactor
-`scripts/ingest_games_raw.py`. After both scripts are stable, consider a focused
-refactor that centralizes environment loading, project-ref validation, date-range
-parsing, and MLB request/retry behavior. Preserve both scripts' behavior with
-regression tests before and after that change.
+Completed on 2026-07-15 after the table-specific writers stabilized:
+
+- Centralized environment loading, project-ref validation, date parsing,
+  Supabase-client creation, and MLB request/retry behavior under
+  `scripts/ingestion/`.
+- Added `scripts/ingest_postgame.py` as the routine shared postgame orchestrator.
+- Retained the standalone table writers for targeted recovery.
+- Added run-scoped schedule, boxscore, venue, and failure caching.
+- Preserved existing behavior with the original regression suite plus new
+  orchestration and request-budget tests.
+
+This refactor required no schema changes.
 
 ## Defer
 

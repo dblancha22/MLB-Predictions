@@ -4,8 +4,10 @@ This document defines timing rules for future derived stats, feature tables, mod
 
 ## Current Ingestion Cadence
 
-The routine morning `games_raw` job processes only the previous calendar day.
-Historical date ranges are used only for backfills, recovery, and audits.
+The routine morning `scripts/ingest_postgame.py` workflow processes only the
+previous calendar day and populates `games_raw`, `team_game_logs`, and
+`pitcher_game_logs` in dependency order. Historical date ranges are used only
+for backfills, recovery, and audits.
 
 Therefore:
 
@@ -13,8 +15,8 @@ Therefore:
   same-day pregame schedule feed.
 - Today's and future matchups must come from a separately documented pregame
   source or table if prediction work needs them.
-- The job remains rerunnable, timestamp-aware, and safe across explicit
-  backfill ranges.
+- The postgame workflow remains rerunnable, timestamp-aware, and safe across
+  explicit backfill ranges.
 - `probable_pitchers` has a separate pregame writer for today's or explicitly
   requested future MLB schedule dates. It does not require or create future
   `games_raw` rows.

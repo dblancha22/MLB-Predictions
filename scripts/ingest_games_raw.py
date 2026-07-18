@@ -8,127 +8,47 @@ It intentionally does not update existing team or venue rows.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 import sys
-import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse, urlunparse
-from urllib.request import Request, urlopen
+
+try:
+    from scripts.ingestion.common import (
+        DEFAULT_ENV_FILE,
+        IngestionError,
+        build_date_range,
+        create_supabase_client,
+        normalize_supabase_url,
+        parse_iso_date,
+        validate_runtime_options,
+    )
+    from scripts.ingestion.mlb import request_json
+except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
+    from ingestion.common import (  # type: ignore[no-redef]
+        DEFAULT_ENV_FILE,
+        IngestionError,
+        build_date_range,
+        create_supabase_client,
+        normalize_supabase_url,
+        parse_iso_date,
+        validate_runtime_options,
+    )
+    from ingestion.mlb import request_json  # type: ignore[no-redef]
 
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 MLB_VENUE_URL = "https://statsapi.mlb.com/api/v1/venues/{venue_id}"
-EXPECTED_SUPABASE_PROJECT_REF = "soakgdpuvtxadjextekg"
-DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 FINAL_STATUS_CODE = "F"
 
 LOGGER = logging.getLogger("ingest_games_raw")
 
 
-class IngestionError(RuntimeError):
-    """Raised when source data or configuration cannot be safely ingested."""
-
-
-def load_env_file(path: Path) -> None:
-    """Load simple KEY=VALUE entries without overwriting process variables."""
-    if not path.exists():
-        return
-
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
-def normalize_supabase_url(value: str) -> str:
-    """Return the project base URL, accepting a legacy trailing /rest/v1 path."""
-    parsed = urlparse(value.strip().rstrip("/"))
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise IngestionError("SUPABASE_URL must be a valid HTTPS project URL")
-    normalized_path = parsed.path.rstrip("/")
-    if normalized_path not in {"", "/rest/v1"}:
-        raise IngestionError(
-            "SUPABASE_URL must be the project base URL or end with /rest/v1"
-        )
-    return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
-
-
-def parse_iso_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid date {value!r}; expected YYYY-MM-DD"
-        ) from exc
-
-
-def build_date_range(
-    single_date: Optional[date], start_date: Optional[date], end_date: Optional[date]
-) -> List[date]:
-    if single_date is not None:
-        if start_date is not None or end_date is not None:
-            raise IngestionError("--date cannot be combined with a date range")
-        return [single_date]
-
-    if start_date is None or end_date is None:
-        raise IngestionError("provide --date or both --start-date and --end-date")
-    if start_date > end_date:
-        raise IngestionError("--start-date must be on or before --end-date")
-
-    span = (end_date - start_date).days
-    return [start_date + timedelta(days=offset) for offset in range(span + 1)]
-
-
 def _request_json(
     url: str, params: Mapping[str, Any], timeout: float, retries: int
 ) -> Dict[str, Any]:
-    request_url = f"{url}?{urlencode(params)}"
-    request = Request(
-        request_url,
-        headers={"Accept": "application/json", "User-Agent": "MLB-Predictions-ingestion/1.0"},
-    )
-
-    for attempt in range(retries + 1):
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                if not 200 <= response.status < 300:
-                    raise IngestionError(
-                        f"MLB Stats API returned HTTP {response.status} for {request_url}"
-                    )
-                payload = json.load(response)
-                if not isinstance(payload, dict):
-                    raise IngestionError("MLB Stats API response was not a JSON object")
-                return payload
-        except HTTPError as exc:
-            retryable = exc.code == 429 or 500 <= exc.code < 600
-            if not retryable or attempt >= retries:
-                raise IngestionError(
-                    f"MLB Stats API returned HTTP {exc.code} for {request_url}"
-                ) from exc
-        except (URLError, TimeoutError) as exc:
-            if attempt >= retries:
-                raise IngestionError(
-                    f"MLB Stats API request failed for {request_url}: {exc}"
-                ) from exc
-
-        delay = 2**attempt
-        LOGGER.warning("MLB request failed; retrying in %s second(s)", delay)
-        time.sleep(delay)
-
-    raise AssertionError("retry loop exited unexpectedly")
+    return request_json(url, params, timeout, retries, LOGGER)
 
 
 def fetch_schedule(
@@ -447,39 +367,6 @@ def extract_dependencies(
     return list(teams.values()), list(venues.values())
 
 
-def create_supabase_client(env_file: Path):
-    load_env_file(env_file)
-    raw_supabase_url = os.getenv("SUPABASE_URL", "").strip()
-    secret_key = (
-        os.getenv("SUPABASE_SECRET_KEY", "").strip()
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    )
-    if not raw_supabase_url:
-        raise IngestionError("SUPABASE_URL is not set")
-    if not secret_key:
-        raise IngestionError(
-            "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is not set"
-        )
-
-    supabase_url = normalize_supabase_url(raw_supabase_url)
-    project_ref = urlparse(supabase_url).hostname or ""
-    project_ref = project_ref.split(".", 1)[0]
-    if project_ref != EXPECTED_SUPABASE_PROJECT_REF:
-        raise IngestionError(
-            "SUPABASE_URL does not point to the expected BagBrainOfficial project "
-            f"({EXPECTED_SUPABASE_PROJECT_REF})"
-        )
-
-    try:
-        from supabase import create_client
-    except ImportError as exc:
-        raise IngestionError(
-            "supabase-py is not installed; run: python -m pip install -r requirements-ingestion.txt"
-        ) from exc
-
-    return create_client(supabase_url, secret_key)
-
-
 def insert_missing_rows(
     client: Any, table: str, id_column: str, rows: Sequence[Mapping[str, Any]]
 ) -> int:
@@ -499,6 +386,7 @@ def insert_missing_enriched_venues(
     venue_rows: Sequence[Mapping[str, Any]],
     timeout: float,
     retries: int,
+    venue_fetcher: Optional[Any] = None,
 ) -> int:
     if not venue_rows:
         return 0
@@ -514,10 +402,11 @@ def insert_missing_enriched_venues(
     if not missing_ids:
         return 0
 
+    fetcher = fetch_venue if venue_fetcher is None else venue_fetcher
     enriched_rows = []
     for venue_id in missing_ids:
         LOGGER.info("venue=%s source=MLB action=enrich", venue_id)
-        venue = fetch_venue(int(venue_id), timeout, retries)
+        venue = fetcher(int(venue_id), timeout, retries)
         enriched_rows.append(transform_enriched_venue(venue))
 
     client.table("venues").insert(enriched_rows).execute()
@@ -576,8 +465,14 @@ def ingest_date(
     dry_run: bool,
     timeout: float,
     retries: int,
+    schedule_payload: Optional[Mapping[str, Any]] = None,
+    venue_fetcher: Optional[Any] = None,
 ) -> Dict[str, int]:
-    payload = fetch_schedule(target_date, game_type, timeout, retries)
+    payload = (
+        fetch_schedule(target_date, game_type, timeout, retries)
+        if schedule_payload is None
+        else schedule_payload
+    )
     games = flatten_schedule(payload)
     skipped_games = []
     games_to_ingest = []
@@ -614,7 +509,7 @@ def ingest_date(
         return summary
 
     summary["venues_inserted"] = insert_missing_enriched_venues(
-        client, venues, timeout, retries
+        client, venues, timeout, retries, venue_fetcher
     )
     summary["teams_inserted"] = insert_missing_rows(client, "teams", "team_id", teams)
     summary["games_upserted"] = upsert_games(client, game_rows)
@@ -650,10 +545,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         dates = build_date_range(args.date, args.start_date, args.end_date)
-        if args.retries < 0:
-            raise IngestionError("--retries cannot be negative")
-        if args.timeout <= 0:
-            raise IngestionError("--timeout must be positive")
+        validate_runtime_options(args.timeout, args.retries)
 
         client = None if args.dry_run else create_supabase_client(args.env_file)
         totals = {

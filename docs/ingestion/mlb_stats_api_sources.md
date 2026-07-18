@@ -76,6 +76,7 @@ Suggested params:
 
 - `sportId=1`
 - `date=YYYY-MM-DD`
+- `startDate=YYYY-MM-DD` and `endDate=YYYY-MM-DD` for bounded postgame ranges
 - `gameType=R`
 - optional `teamId`
 - recommended `hydrate=probablePitcher,venue,team`
@@ -117,6 +118,9 @@ Observed fields useful for `probable_pitchers`:
 
 Observed limitations:
 
+- `scripts/ingest_postgame.py` hydrates `venue,team` once per bounded postgame
+  date chunk and splits the response back into MLB source-date entries before
+  applying postponement and resumption rules.
 - `probablePitcher` hydration includes pitcher ID/name/link, but not `pitchHand`.
 - `pitchHand` should be fetched from `/people/{personId}` when needed.
 - Probables can be missing, and scripts should treat that as a normal pregame condition.
@@ -239,6 +243,9 @@ Observed fields useful for `pitcher_game_logs`:
 
 Observed limitations:
 
+- The shared postgame workflow requests one boxscore per unique final
+  `gamePk` per process run. Team and pitcher transforms consume the same cached
+  payload; standalone recovery commands can still fetch independently.
 - Store pitcher-list entries only when their game pitching stats report
   `gamesPitched>0`, and use `gamesStarted>0` to set `is_starter=true`.
 - Innings pitched is MLB notation like `6.0`, `5.1`, `5.2`; use MLB's `outs` field as the canonical stored calculation value.
