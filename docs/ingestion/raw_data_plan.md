@@ -258,13 +258,14 @@ python scripts/ingest_pregame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD
 Implemented on 2026-07-15:
 
 - `scripts/ingest_postgame.py` is the routine postgame entry point for
-  `games_raw`, `team_game_logs`, and `pitcher_game_logs`.
+  `games_raw`, insert-only `probable_pitchers` recovery, `team_game_logs`, and
+  `pitcher_game_logs`.
 - `--yesterday` resolves the prior calendar date in
   `America/Los_Angeles` by default. This timezone selects the requested date;
   it does not change MLB `officialDate` or UTC-normalized `gameDate` values.
-- One hydrated `/schedule` response is shared across all three stages. Date
-  ranges use bounded schedule requests and retain MLB's individual source-date
-  entries for postponement and resumption handling.
+- One `/schedule` response hydrated with `probablePitcher,venue,team` is shared
+  across all four stages. Date ranges use bounded schedule requests and retain
+  MLB's individual source-date entries for postponement and resumption handling.
 - Each unique final `gamePk` boxscore is requested once per command run and the
   same response is passed to both team- and pitcher-log transforms.
 - Successful responses and exhausted request failures are cached only in
@@ -272,11 +273,16 @@ Implemented on 2026-07-15:
   rerun refreshes MLB corrections.
 - Missing venue lookups use the same run-scoped client and remain conditional
   on the venue not already existing in Supabase.
+- Missing probable assignments on postgame-safe finals use the same schedule
+  payload and person cache. Recovery uses conflict-ignore inserts, never
+  updates or deletes an existing row, and labels inserted rows
+  `postgame_recovery`.
 - A failed `games_raw` stage prevents dependent log stages for that date. A
   game-level log failure remains isolated, is reported, and produces a nonzero
   final exit.
 - Existing table-specific scripts remain supported for targeted recovery.
-- The refactor adds no tables, migrations, or changes to raw-table keys.
+- The recovery addition keeps all existing table keys and adds only the
+  constrained `probable_pitchers.capture_type` provenance column.
 
 Commands:
 
@@ -286,6 +292,7 @@ python scripts/ingest_postgame.py --date YYYY-MM-DD
 python scripts/ingest_postgame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD
 python scripts/ingest_postgame.py --yesterday --dry-run
 python scripts/ingest_postgame.py --date YYYY-MM-DD --steps team-logs,pitcher-logs
+python scripts/ingest_postgame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD --steps probable-recovery
 ```
 
 The default schedule chunk is seven days. `--schedule-chunk-days` may be used
@@ -306,6 +313,21 @@ Live validation completed on 2026-07-15:
   game failures. Existing primary/composite keys made the rerun convergent
   without duplicate rows.
 
+Postgame probable recovery validation completed on 2026-07-18:
+
+- A May 15 recovery-only dry run found all 30 retained assignments with no
+  malformed games or missing source values.
+- The bounded April 25 through July 18 run found 2,158 announced assignments,
+  preserved six existing rows, inserted 2,152 missing rows, observed two normal
+  missing MLB assignments, and had zero game or person failures.
+- The immediate idempotency rerun found all 2,158 assignments already present,
+  inserted zero rows, and made only the 13 bounded schedule requests.
+- The final audit contained 2,942 rows and 2,942 distinct composite keys: 782
+  `legacy_unknown`, eight `pregame`, and 2,152 `postgame_recovery`, with no null
+  pitcher IDs, names, or hands. Four recovered assignments differed from the
+  actual starter, further confirming that recovery does not simply copy
+  boxscore starters.
+
 ## Morning Workflow
 
 Run the same-day pregame job first:
@@ -323,9 +345,11 @@ The separate postgame job processes only the previous calendar day:
 3. Insert any missing team or venue identities referenced by those games.
 4. Upsert yesterday's games into `games_raw`, including final status and scores
    when MLB reports status code `F`.
-5. Request one boxscore for each unique postgame-safe final.
-6. Populate `team_game_logs` and `pitcher_game_logs` from shared boxscores.
-7. Mark pitcher logs processed after each complete pitcher row set writes.
+5. Insert missing MLB-retained probable assignments for postgame-safe finals,
+   labeling them `postgame_recovery` without changing existing rows.
+6. Request one boxscore for each unique postgame-safe final.
+7. Populate `team_game_logs` and `pitcher_game_logs` from shared boxscores.
+8. Mark pitcher logs processed after each complete pitcher row set writes.
 
 The routine pregame command loads today. Explicit short pregame ranges are for
 testing and recovery; broad postgame ranges remain reserved for historical

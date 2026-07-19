@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 try:
     from scripts import ingest_games_raw as games_ingestion
     from scripts import ingest_pitcher_game_logs as pitcher_ingestion
+    from scripts import ingest_probable_pitchers as probable_ingestion
     from scripts import ingest_team_game_logs as team_ingestion
     from scripts.ingestion.common import (
         DEFAULT_ENV_FILE,
@@ -28,6 +29,7 @@ try:
 except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
     import ingest_games_raw as games_ingestion  # type: ignore[no-redef]
     import ingest_pitcher_game_logs as pitcher_ingestion  # type: ignore[no-redef]
+    import ingest_probable_pitchers as probable_ingestion  # type: ignore[no-redef]
     import ingest_team_game_logs as team_ingestion  # type: ignore[no-redef]
     from ingestion.common import (  # type: ignore[no-redef]
         DEFAULT_ENV_FILE,
@@ -46,7 +48,8 @@ except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
 
 
 LOGGER = logging.getLogger("ingest_postgame")
-ALL_STEPS = ("games", "team-logs", "pitcher-logs")
+ALL_STEPS = ("games", "probable-recovery", "team-logs", "pitcher-logs")
+POSTGAME_SCHEDULE_HYDRATION = "probablePitcher,venue,team"
 
 
 def parse_steps(value: str) -> Tuple[str, ...]:
@@ -99,6 +102,12 @@ def run_postgame(
         "dates": len(dates),
         "dates_failed": 0,
         "games_upserted": 0,
+        "probable_rows_inserted": 0,
+        "probable_assignments_found": 0,
+        "probable_assignments_existing": 0,
+        "probable_assignments_missing": 0,
+        "probable_games_failed": 0,
+        "probable_people_failed": 0,
         "team_rows_upserted": 0,
         "pitcher_rows_upserted": 0,
         "team_games_failed": 0,
@@ -109,7 +118,12 @@ def run_postgame(
 
     for chunk in chunked_dates(dates, schedule_chunk_days):
         try:
-            schedule = mlb_client.fetch_schedule_range(chunk[0], chunk[-1], game_type)
+            schedule = mlb_client.fetch_schedule_range(
+                chunk[0],
+                chunk[-1],
+                game_type,
+                hydrate=POSTGAME_SCHEDULE_HYDRATION,
+            )
             schedules = schedule_payloads_by_date(schedule, chunk)
         except Exception as exc:
             failed_dates.update(chunk)
@@ -142,6 +156,40 @@ def run_postgame(
                         "date=%s stage=games action=fail error=%s", target_date, exc
                     )
                     continue
+
+            if "probable-recovery" in selected:
+                try:
+                    summary = probable_ingestion.ingest_recovery_date(
+                        supabase_client,
+                        target_date,
+                        game_type,
+                        dry_run,
+                        timeout,
+                        retries,
+                        schedule_payload=payload,
+                        person_fetcher=mlb_client.fetch_person,
+                    )
+                    totals["probable_rows_inserted"] += summary["rows_inserted"]
+                    totals["probable_assignments_found"] += summary[
+                        "assignments_found"
+                    ]
+                    totals["probable_assignments_existing"] += summary[
+                        "assignments_existing"
+                    ]
+                    totals["probable_assignments_missing"] += summary[
+                        "assignments_missing"
+                    ]
+                    totals["probable_games_failed"] += summary["games_failed"]
+                    totals["probable_people_failed"] += summary["people_failed"]
+                    if summary["games_failed"] or summary["people_failed"]:
+                        failed_dates.add(target_date)
+                except Exception as exc:
+                    failed_dates.add(target_date)
+                    LOGGER.error(
+                        "date=%s stage=probable-recovery action=fail error=%s",
+                        target_date,
+                        exc,
+                    )
 
             if "team-logs" in selected:
                 try:
@@ -203,8 +251,8 @@ def run_postgame(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Populate games_raw, team_game_logs, and pitcher_game_logs from one "
-            "shared MLB schedule/boxscore run."
+            "Populate games_raw, probable_pitchers recovery rows, team_game_logs, "
+            "and pitcher_game_logs from one shared MLB schedule/boxscore run."
         )
     )
     parser.add_argument("--yesterday", action="store_true")
@@ -269,12 +317,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     LOGGER.info(
         "complete dates=%s dates_failed=%s games_upserted=%s "
+        "probable_assignments_found=%s probable_assignments_existing=%s "
+        "probable_assignments_missing=%s probable_rows_inserted=%s "
+        "probable_games_failed=%s "
+        "probable_people_failed=%s "
         "team_rows_upserted=%s pitcher_rows_upserted=%s "
         "games_marked_processed=%s team_games_failed=%s "
         "pitcher_games_failed=%s mlb_requests=%s mlb_cache_hits=%s dry_run=%s",
         totals["dates"],
         totals["dates_failed"],
         totals["games_upserted"],
+        totals["probable_assignments_found"],
+        totals["probable_assignments_existing"],
+        totals["probable_assignments_missing"],
+        totals["probable_rows_inserted"],
+        totals["probable_games_failed"],
+        totals["probable_people_failed"],
         totals["team_rows_upserted"],
         totals["pitcher_rows_upserted"],
         totals["games_marked_processed"],

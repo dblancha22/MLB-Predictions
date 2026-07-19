@@ -122,9 +122,9 @@ Observed limitations:
   bounded pregame date chunk. The same source-date payload first populates
   `games_raw` and then synchronizes `probable_pitchers`; person and missing-
   venue lookups use the same run-scoped MLB client.
-- `scripts/ingest_postgame.py` hydrates `venue,team` once per bounded postgame
-  date chunk and splits the response back into MLB source-date entries before
-  applying postponement and resumption rules.
+- `scripts/ingest_postgame.py` hydrates `probablePitcher,venue,team` once per
+  bounded postgame date chunk and splits the response back into MLB source-date
+  entries before applying postponement and resumption rules.
 - `probablePitcher` hydration includes pitcher ID/name/link, but not `pitchHand`.
 - `pitchHand` should be fetched from `/people/{personId}` when needed.
 - Probables can be missing, and scripts should treat that as a normal pregame condition.
@@ -132,6 +132,17 @@ Observed limitations:
   `status.abstractGameState=Preview`. A valid missing probable deletes an
   existing row for that game/team; live/final games and malformed responses do
   not clear assignments.
+- Postgame recovery uses only final games (`statusCode=F` or
+  `codedGameState=F`). It inserts retained schedule assignments only when the
+  composite key is absent, labels them `postgame_recovery`, and never updates
+  or deletes an existing assignment.
+- A 2026-07-18 retention probe checked six completed games from May 15, June
+  15, and July 10; all still exposed both probable-pitcher IDs. Four additional
+  April games had a captured pregame probable different from the actual
+  starter, and the completed-game schedule response still returned the earlier
+  captured probable in every case. This supports recovery use while the
+  provenance label prevents treating the recovery timestamp as a pregame
+  observation timestamp.
 - The pregame games stage intentionally writes every schedule occurrence for
   its requested date, not only `Preview` games. This keeps `games_raw` current
   if the command runs after a status change; the probable stage remains strict.

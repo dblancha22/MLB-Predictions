@@ -9,9 +9,9 @@ The routine morning workflow has separate pregame and postgame commands:
 - `scripts/ingest_pregame.py --today` loads today's schedule into `games_raw`
   and then refreshes `probable_pitchers` from one shared schedule response.
 - `scripts/ingest_postgame.py --yesterday` processes the previous calendar day
-  and updates `games_raw`, `team_game_logs`, and `pitcher_game_logs` in
-  dependency order. Historical postgame ranges remain for backfills, recovery,
-  and audits.
+  and updates `games_raw`, inserts missing MLB-retained probable assignments,
+  then updates `team_game_logs` and `pitcher_game_logs` in dependency order.
+  Historical postgame ranges remain for backfills, recovery, and audits.
 
 Therefore:
 
@@ -19,9 +19,11 @@ Therefore:
   canonical rows are updated after finalization.
 - The postgame workflow remains rerunnable, timestamp-aware, and safe across
   explicit backfill ranges.
-- `probable_pitchers` remains a latest-state table and its standalone writer
-  remains available for targeted recovery. The orchestrated games stage now
-  creates the parent `games_raw` rows needed by `pregame_team_features`.
+- `probable_pitchers` remains a latest-state table. `capture_type=pregame`
+  identifies assignments actually observed before first pitch, while
+  `postgame_recovery` identifies MLB-retained assignments fetched after final.
+  Rows that predate the current writer are `legacy_unknown`. The standalone
+  writer remains available for targeted pregame recovery.
 - `pregame_team_features` population remains unimplemented. When added, it must
   run only after both current pregame stages succeed.
 
@@ -132,7 +134,10 @@ Current raw schema:
 Current decision:
 
 - No separate actual-starter table yet.
-- `probable_pitchers` contains only MLB's latest observed pregame assignment.
+- `probable_pitchers` contains MLB's latest captured assignment and records
+  whether it was captured pregame or recovered after final.
+- Legacy assignments whose observation timing cannot be proven are labeled
+  `legacy_unknown`.
 - Actual starters remain in `pitcher_game_logs` through `is_starter=true`.
 
 Timing caution:
@@ -142,7 +147,10 @@ Timing caution:
 - The current writer updates an announced pitcher and deletes the assignment
   when a valid pregame response no longer names one. It does not retain change
   history, so `updated_at` alone cannot reconstruct every earlier assignment.
-- Live/final schedule responses do not update or clear pregame assignments.
+- Live/final schedule responses do not update or clear existing assignments.
+  A final response may insert a missing row as `postgame_recovery`; downstream
+  leakage-safe training must not treat its `updated_at` as proof that the
+  assignment was known before first pitch.
 
 ## Odds
 

@@ -193,6 +193,15 @@ After the initial `2026-07-17` validation and idempotency rerun on 2026-07-14,
 the table contained 786 rows across 395 games and 786 distinct composite keys.
 The four new rows matched MLB pitcher IDs, names, and hand codes.
 
+After the postgame recovery backfill through 2026-07-18, the table contained
+2,942 distinct composite keys: 782 `legacy_unknown` rows, eight `pregame`
+rows, and 2,152 `postgame_recovery` rows. All rows had non-null pitcher IDs,
+names, and hands.
+Of 1,474 games in the audited range, 1,470 had both assignments, two final
+games had one MLB-retained assignment, and two July 18 games that were still in
+progress had none; the next successful postgame run can recover those if MLB
+retains the assignments after final.
+
 Primary key: `(game_id, team_id)`
 
 Foreign keys: none. The routine pregame orchestrator nevertheless writes
@@ -207,6 +216,8 @@ Important columns:
 - `pitch_hand text`
 - `full_name text`
 - `updated_at timestamptz`
+- `capture_type text NOT NULL DEFAULT 'pregame'`, constrained to
+  `legacy_unknown`, `pregame`, or `postgame_recovery`
 
 Ingestion notes:
 
@@ -216,15 +227,21 @@ Ingestion notes:
   combined schedule payload into this writer.
 - Process only games with `status.abstractGameState=Preview`.
 - Morning rows are mutable because probable pitchers can change. Upsert
-  announced assignments by `(game_id, team_id)`.
+  announced assignments by `(game_id, team_id)` and label them `pregame`.
 - When a valid pregame response has no probable for a game/team, delete that
   existing assignment. Do not clear data after a failed or malformed response.
 - Enrich `pitch_hand` with MLB `/people/{personId}`. A failed enrichment stores
   null rather than carrying another pitcher's hand across an assignment change.
-- Do not update this table from completed-game boxscores. Actual starters are
-  represented by `pitcher_game_logs.is_starter`.
+- `scripts/ingest_postgame.py` uses MLB's final schedule response only to insert
+  a missing `(game_id, team_id)` assignment. It labels the row
+  `postgame_recovery`, ignores primary-key conflicts, never overwrites or
+  deletes an existing assignment, and never substitutes the boxscore starter.
+- Actual starters are represented by `pitcher_game_logs.is_starter`.
 - The table stores latest state, not assignment history. `updated_at` records
-  when the current announced assignment was observed.
+  when the current announced assignment was observed. `capture_type` separates
+  a true pregame observation from a retrospectively recovered MLB assignment;
+  rows predating the current writer are conservatively labeled
+  `legacy_unknown`.
 
 ### `public.team_game_logs`
 

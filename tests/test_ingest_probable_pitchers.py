@@ -3,12 +3,17 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from scripts.ingest_probable_pitchers import (
+    CAPTURE_TYPE_POSTGAME_RECOVERY,
+    CAPTURE_TYPE_PREGAME,
     IngestionError,
     build_date_range,
     extract_pitch_hand,
     fetch_person,
     fetch_schedule,
+    final_games,
     ingest_date,
+    ingest_recovery_date,
+    insert_recovered_probable_pitchers,
     pregame_games,
     sync_probable_pitchers,
     transform_assignment_slots,
@@ -76,7 +81,27 @@ class TransformTests(unittest.TestCase):
                 "pitch_hand": None,
                 "full_name": "Chris Sale",
                 "updated_at": UPDATED_AT,
+                "capture_type": CAPTURE_TYPE_PREGAME,
             },
+        )
+
+    def test_final_filter_accepts_completed_early_and_deduplicates_game_id(self):
+        completed_early = sample_game(abstract_state="Final")
+        completed_early["status"]["statusCode"] = "FR"
+        completed_early["status"]["codedGameState"] = "F"
+        duplicate = dict(completed_early)
+        live = sample_game(game_id=2, abstract_state="Live")
+        self.assertEqual(final_games([completed_early, live, duplicate]), [duplicate])
+
+    def test_recovery_transform_records_provenance(self):
+        rows, _missing = transform_assignment_slots(
+            sample_game(), UPDATED_AT, CAPTURE_TYPE_POSTGAME_RECOVERY
+        )
+        self.assertTrue(
+            all(
+                row["capture_type"] == CAPTURE_TYPE_POSTGAME_RECOVERY
+                for row in rows
+            )
         )
 
     def test_missing_probable_becomes_clear_key_not_null_row(self):
@@ -170,13 +195,16 @@ class FakeQuery:
             return FakeResponse(self.client.existing_probables)
         if self.operation == "delete":
             self.client.deleted.append(tuple(self.filters))
+        if self.operation == "upsert":
+            return FakeResponse(self.client.upserted_data)
         return FakeResponse([])
 
 
 class FakeClient:
-    def __init__(self, teams=None, existing_probables=None):
+    def __init__(self, teams=None, existing_probables=None, upserted_data=None):
         self.teams = teams or []
         self.existing_probables = existing_probables or []
+        self.upserted_data = upserted_data or []
         self.calls = []
         self.deleted = []
 
@@ -214,6 +242,95 @@ class WriteTests(unittest.TestCase):
         client = FakeClient(existing_probables=[])
         self.assertEqual(sync_probable_pitchers(client, rows, missing), (1, 0))
         self.assertFalse(any(call[0] == "delete" for call in client.calls))
+
+    def test_recovery_insert_ignores_conflicts_instead_of_overwriting(self):
+        rows, _missing = transform_assignment_slots(
+            sample_game(), UPDATED_AT, CAPTURE_TYPE_POSTGAME_RECOVERY
+        )
+        client = FakeClient(upserted_data=rows)
+        self.assertEqual(insert_recovered_probable_pitchers(client, rows), 2)
+        upsert = next(call for call in client.calls if call[0] == "upsert")
+        self.assertEqual(
+            upsert[3],
+            {
+                "on_conflict": "game_id,team_id",
+                "ignore_duplicates": True,
+                "default_to_null": False,
+            },
+        )
+
+    def test_postgame_recovery_inserts_only_missing_assignment(self):
+        game = sample_game(abstract_state="Final")
+        game["status"]["statusCode"] = "F"
+        game["status"]["codedGameState"] = "F"
+        client = FakeClient(
+            teams=[{"team_id": 111}, {"team_id": 139}],
+            existing_probables=[{"game_id": 824766, "team_id": 111}],
+            upserted_data=[{"game_id": 824766, "team_id": 139}],
+        )
+        person_fetcher = Mock(return_value=person_payload(643377, "R"))
+        summary = ingest_recovery_date(
+            client,
+            date(2026, 7, 17),
+            "R",
+            False,
+            30.0,
+            2,
+            schedule_payload={"dates": [{"games": [game]}]},
+            person_fetcher=person_fetcher,
+        )
+        self.assertEqual(summary["assignments_found"], 2)
+        self.assertEqual(summary["assignments_existing"], 1)
+        self.assertEqual(summary["rows_inserted"], 1)
+        person_fetcher.assert_called_once_with(643377, 30.0, 2)
+        upsert = next(call for call in client.calls if call[0] == "upsert")
+        self.assertEqual(len(upsert[2]), 1)
+        self.assertEqual(upsert[2][0]["team_id"], 139)
+        self.assertEqual(
+            upsert[2][0]["capture_type"], CAPTURE_TYPE_POSTGAME_RECOVERY
+        )
+
+    def test_postgame_recovery_never_deletes_missing_assignment(self):
+        game = sample_game(
+            abstract_state="Final", home_probable=False, away_probable=False
+        )
+        game["status"]["statusCode"] = "F"
+        game["status"]["codedGameState"] = "F"
+        client = FakeClient(
+            existing_probables=[{"game_id": 824766, "team_id": 111}]
+        )
+        summary = ingest_recovery_date(
+            client,
+            date(2026, 7, 17),
+            "R",
+            False,
+            30.0,
+            2,
+            schedule_payload={"dates": [{"games": [game]}]},
+        )
+        self.assertEqual(summary["assignments_missing"], 2)
+        self.assertFalse(any(call[0] == "delete" for call in client.calls))
+
+    def test_postgame_people_failure_skips_row_for_safe_retry(self):
+        game = sample_game(
+            abstract_state="Final", home_probable=True, away_probable=False
+        )
+        game["status"]["statusCode"] = "F"
+        game["status"]["codedGameState"] = "F"
+        client = FakeClient(teams=[{"team_id": 111}])
+        summary = ingest_recovery_date(
+            client,
+            date(2026, 7, 17),
+            "R",
+            False,
+            30.0,
+            2,
+            schedule_payload={"dates": [{"games": [game]}]},
+            person_fetcher=Mock(side_effect=IngestionError("people unavailable")),
+        )
+        self.assertEqual(summary["people_failed"], 1)
+        self.assertEqual(summary["rows_inserted"], 0)
+        self.assertFalse(any(call[0] == "upsert" for call in client.calls))
 
     def test_ingest_deletes_absent_assignment_from_valid_pregame_response(self):
         game = sample_game(home_probable=False, away_probable=False)

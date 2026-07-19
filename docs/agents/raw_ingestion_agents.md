@@ -9,9 +9,10 @@ This project should treat the existing notebook as a modeling prototype, not as 
 - Focus only on scripts that populate raw Supabase tables.
 - Do not build derived stats, feature tables, model-training tables, or prediction tables yet.
 - The routine morning postgame workflow uses `scripts/ingest_postgame.py` to
-  ingest only the previous calendar day's `games_raw`, `team_game_logs`, and
-  `pitcher_game_logs` data in dependency order. Date ranges remain available
-  for historical backfills and recovery runs.
+  ingest only the previous calendar day's `games_raw`, insert missing
+  `probable_pitchers` assignments retained by MLB, and populate
+  `team_game_logs` and `pitcher_game_logs` in dependency order. Date ranges
+  remain available for historical backfills and recovery runs.
 - The orchestrator shares one schedule payload per bounded date chunk and one
   boxscore per unique final `gamePk`. Preserve its run-scoped response cache and
   physical-request metrics when changing postgame ingestion.
@@ -79,6 +80,7 @@ Responsibilities:
 - Maintain the shared request budget: one schedule response per bounded chunk
   and one boxscore response per unique final game in a process run.
 - Preserve dependency ordering: `games_raw`, then `team_game_logs`, then
+  insert-only `probable_pitchers` recovery, then `team_game_logs`, then
   `pitcher_game_logs` and its processed marker.
 - Avoid model leakage concerns later by labeling data timing now.
 - Keep scripts narrow, testable, and resumable.

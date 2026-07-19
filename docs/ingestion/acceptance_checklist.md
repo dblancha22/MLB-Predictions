@@ -39,11 +39,21 @@ Use this checklist before considering a raw ingestion script ready.
   to `America/Los_Angeles`.
 - Timezone selection affects only date resolution, not MLB official dates or
   stored UTC timestamps.
-- The three postgame stages share one schedule payload per bounded date chunk.
+- The four postgame stages share one schedule payload hydrated with
+  `probablePitcher,venue,team` per bounded date chunk.
 - Team and pitcher transforms share one boxscore payload per unique `gamePk`.
 - In-memory cache state is discarded after the command exits.
 - Physical MLB request and cache-hit totals are logged.
 - A failed games stage skips dependent stages for that date.
+- Probable recovery processes only postgame-safe finals, inserts only missing
+  composite keys, and never updates or deletes an existing assignment.
+- Recovered rows are labeled `capture_type=postgame_recovery`; normal pregame
+  rows are labeled `capture_type=pregame`.
+- Rows predating the current writer are labeled `capture_type=legacy_unknown`
+  rather than being retroactively claimed as pregame observations.
+- A failed recovery person lookup skips that assignment and makes the command
+  exit nonzero so a rerun can complete it safely.
+- `--steps probable-recovery` supports a recovery-only historical range.
 - Existing table-specific commands remain usable for targeted recovery.
 
 ## Shared Pregame Workflow
@@ -105,6 +115,11 @@ Use this checklist before considering a raw ingestion script ready.
   live/final schedule record.
 - Validates team IDs but does not require future games in `games_raw`.
 - Keeps actual-starter logic in `pitcher_game_logs`.
+- Postgame recovery inserts an MLB-retained probable only when no row exists,
+  uses conflict-ignore semantics, and never substitutes an actual starter.
+- `capture_type` distinguishes `pregame` observations from
+  `postgame_recovery` rows and conservatively labels older rows
+  `legacy_unknown`.
 - Continues after person-enrichment failures, stores a null hand for the current
   assignment, and exits nonzero so the metadata can be retried.
 

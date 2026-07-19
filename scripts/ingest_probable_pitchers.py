@@ -37,6 +37,10 @@ except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 MLB_PERSON_URL = "https://statsapi.mlb.com/api/v1/people/{pitcher_id}"
 PREGAME_ABSTRACT_STATE = "Preview"
+FINAL_STATUS_CODE = "F"
+FINAL_CODED_GAME_STATE = "F"
+CAPTURE_TYPE_PREGAME = "pregame"
+CAPTURE_TYPE_POSTGAME_RECOVERY = "postgame_recovery"
 
 LOGGER = logging.getLogger("ingest_probable_pitchers")
 AssignmentKey = Tuple[int, int]
@@ -122,8 +126,25 @@ def pregame_games(games: Iterable[Mapping[str, Any]]) -> List[Mapping[str, Any]]
     return list(by_id.values())
 
 
+def final_games(games: Iterable[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """Return one postgame-safe occurrence per canonical MLB gamePk."""
+    by_id: Dict[int, Mapping[str, Any]] = {}
+    for game in games:
+        status = game.get("status")
+        if not isinstance(status, Mapping) or not (
+            status.get("statusCode") == FINAL_STATUS_CODE
+            or status.get("codedGameState") == FINAL_CODED_GAME_STATE
+        ):
+            continue
+        game_id = _required_int(game, "gamePk", "game")
+        by_id[game_id] = game
+    return list(by_id.values())
+
+
 def transform_assignment_slots(
-    game: Mapping[str, Any], updated_at: str
+    game: Mapping[str, Any],
+    updated_at: str,
+    capture_type: str = CAPTURE_TYPE_PREGAME,
 ) -> Tuple[List[Dict[str, Any]], Set[AssignmentKey]]:
     """Map announced assignments and identify slots MLB currently leaves empty."""
     game_id = _required_int(game, "gamePk", "game")
@@ -158,6 +179,7 @@ def transform_assignment_slots(
                 "pitch_hand": None,
                 "full_name": str(full_name) if full_name is not None else None,
                 "updated_at": updated_at,
+                "capture_type": capture_type,
             }
         )
     return rows, missing
@@ -244,6 +266,141 @@ def sync_probable_pitchers(
             .execute()
         )
     return len(prepared), len(to_delete)
+
+
+def existing_assignment_keys(
+    client: Any, game_ids: Iterable[int]
+) -> Set[AssignmentKey]:
+    requested = sorted(set(game_ids))
+    if not requested:
+        return set()
+    response = (
+        client.table("probable_pitchers")
+        .select("game_id,team_id")
+        .in_("game_id", requested)
+        .execute()
+    )
+    return {
+        (int(row["game_id"]), int(row["team_id"]))
+        for row in (response.data or [])
+    }
+
+
+def insert_recovered_probable_pitchers(
+    client: Any, rows: Sequence[Mapping[str, Any]]
+) -> int:
+    """Insert recovery rows without changing any existing assignment."""
+    prepared = [dict(row) for row in rows]
+    if not prepared:
+        return 0
+    response = (
+        client.table("probable_pitchers")
+        .upsert(
+            prepared,
+            on_conflict="game_id,team_id",
+            ignore_duplicates=True,
+            default_to_null=False,
+        )
+        .execute()
+    )
+    return len(response.data or [])
+
+
+def ingest_recovery_date(
+    client: Any,
+    target_date: date,
+    game_type: str,
+    dry_run: bool,
+    timeout: float,
+    retries: int,
+    schedule_payload: Optional[Mapping[str, Any]] = None,
+    person_fetcher: Optional[Any] = None,
+) -> Dict[str, int]:
+    """Insert missing probable assignments retained on final MLB schedules."""
+    payload = (
+        fetch_schedule(target_date, game_type, timeout, retries)
+        if schedule_payload is None
+        else schedule_payload
+    )
+    schedule_games = flatten_schedule(payload)
+    eligible_games = final_games(schedule_games)
+    summary = {
+        "games_found": len(schedule_games),
+        "final_games_found": len(eligible_games),
+        "non_final_skipped": len(schedule_games) - len(eligible_games),
+        "games_failed": 0,
+        "assignments_found": 0,
+        "assignments_existing": 0,
+        "assignments_missing": 0,
+        "people_failed": 0,
+        "rows_inserted": 0,
+    }
+    observed_at = datetime.now(timezone.utc).isoformat()
+    rows: List[Dict[str, Any]] = []
+    for game in eligible_games:
+        game_id = game.get("gamePk")
+        try:
+            game_rows, game_missing = transform_assignment_slots(
+                game,
+                observed_at,
+                CAPTURE_TYPE_POSTGAME_RECOVERY,
+            )
+            rows.extend(game_rows)
+            summary["assignments_missing"] += len(game_missing)
+        except Exception as exc:
+            summary["games_failed"] += 1
+            LOGGER.error(
+                "date=%s game=%s source=MLB-schedule action=skip-recovery error=%s",
+                target_date,
+                game_id,
+                exc,
+            )
+
+    summary["assignments_found"] = len(rows)
+    if dry_run or not rows:
+        return summary
+
+    existing = existing_assignment_keys(
+        client, (int(row["game_id"]) for row in rows)
+    )
+    new_rows = [
+        row
+        for row in rows
+        if (int(row["game_id"]), int(row["team_id"])) not in existing
+    ]
+    summary["assignments_existing"] = len(rows) - len(new_rows)
+    if not new_rows:
+        return summary
+
+    validate_team_dependencies(client, (int(row["team_id"]) for row in new_rows))
+    get_person = fetch_person if person_fetcher is None else person_fetcher
+    hands: Dict[int, Optional[str]] = {}
+    failed_pitchers: Set[int] = set()
+    for pitcher_id in sorted({int(row["pitcher_id"]) for row in new_rows}):
+        try:
+            hands[pitcher_id] = extract_pitch_hand(
+                get_person(pitcher_id, timeout, retries), pitcher_id
+            )
+        except Exception as exc:
+            summary["people_failed"] += 1
+            failed_pitchers.add(pitcher_id)
+            LOGGER.error(
+                "date=%s pitcher=%s source=MLB-people "
+                "action=skip-recovery-assignment error=%s",
+                target_date,
+                pitcher_id,
+                exc,
+            )
+    write_rows = [
+        row for row in new_rows if int(row["pitcher_id"]) not in failed_pitchers
+    ]
+    for row in write_rows:
+        row["pitch_hand"] = hands[int(row["pitcher_id"])]
+
+    summary["rows_inserted"] = insert_recovered_probable_pitchers(
+        client, write_rows
+    )
+    return summary
 
 
 def ingest_date(
