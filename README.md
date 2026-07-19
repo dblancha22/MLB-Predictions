@@ -1,6 +1,8 @@
 # MLB Predictions Ingestion
 
-This repository currently focuses on populating the raw MLB data tables in Supabase. The routine morning workflow updates today's probable pitchers and yesterday's completed game logs.
+This repository currently focuses on populating MLB data tables in Supabase. The
+routine morning workflow loads today's schedule and probable pitchers before
+updating yesterday's completed game logs.
 
 ## Morning workflow
 
@@ -10,16 +12,20 @@ Run commands from the repository root:
 cd /Users/austinblanchard/MLB-Predictions
 ```
 
-### 1. Update today's probable pitchers
+### 1. Load today's pregame data
 
-Use today's MLB schedule date. For example:
+Run the pregame orchestrator:
 
 ```bash
-.venv/bin/python scripts/ingest_probable_pitchers.py --date YYYY-MM-DD --dry-run
-.venv/bin/python scripts/ingest_probable_pitchers.py --date YYYY-MM-DD
+.venv/bin/python scripts/ingest_pregame.py --today --dry-run
+.venv/bin/python scripts/ingest_pregame.py --today
 ```
 
-The probable-pitcher job processes MLB preview games, stores the current assignment by game/team, and can be rerun near first pitch because assignments may change.
+`--today` resolves the current calendar date in `America/Los_Angeles`. The
+orchestrator shares one MLB schedule response while it first upserts every game
+for the date into `games_raw`, then synchronizes probable pitchers for games
+still in MLB's `Preview` state. It can be rerun before first pitch because the
+schedule and probable assignments are mutable.
 
 ### 2. Populate yesterday's game logs
 
@@ -44,6 +50,7 @@ Review the command summary for:
 
 - failed schedule, boxscore, transform, or database operations
 - games discovered and upserted
+- probable-pitcher rows written or deleted
 - team-log rows written
 - pitcher-log rows written
 - pitcher-log processing markers completed
@@ -56,11 +63,14 @@ The table-specific scripts remain available for isolated recovery:
 
 ```bash
 .venv/bin/python scripts/ingest_games_raw.py --date YYYY-MM-DD
+.venv/bin/python scripts/ingest_probable_pitchers.py --date YYYY-MM-DD
 .venv/bin/python scripts/ingest_team_game_logs.py --date YYYY-MM-DD
 .venv/bin/python scripts/ingest_pitcher_game_logs.py --date YYYY-MM-DD
 ```
 
-Use the postgame orchestrator for the normal daily run. Use date ranges only for historical backfills, recovery, or explicit audits.
+Use the pregame and postgame orchestrators for the normal daily run. Explicit
+dates and short ranges on the pregame command are available for testing and
+recovery; postgame ranges remain for historical backfills, recovery, or audits.
 
 ## Environment
 

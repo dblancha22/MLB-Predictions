@@ -2,11 +2,18 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from scripts.ingestion.common import IngestionError, resolve_yesterday
+from scripts.ingestion.common import IngestionError, resolve_today, resolve_yesterday
 from scripts.ingestion.mlb import MLBStatsClient, schedule_payloads_by_date
 
 
 class DateResolutionTests(unittest.TestCase):
+    def test_today_uses_configured_timezone(self):
+        now = datetime(2026, 7, 19, 1, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            resolve_today("America/Los_Angeles", now).isoformat(),
+            "2026-07-18",
+        )
+
     def test_yesterday_uses_configured_timezone_without_changing_source_dates(self):
         now = datetime(2026, 7, 16, 1, 0, tzinfo=timezone.utc)
         self.assertEqual(
@@ -58,7 +65,21 @@ class MLBClientCacheTests(unittest.TestCase):
         self.assertEqual(split[first]["dates"][0]["games"][0]["gamePk"], 1)
         self.assertEqual(split[second]["dates"][0]["games"][0]["gamePk"], 2)
 
+    def test_schedule_hydration_is_part_of_the_request_contract(self):
+        client = MLBStatsClient()
+        with patch(
+            "scripts.ingestion.mlb.request_json", return_value={"dates": []}
+        ) as request:
+            client.fetch_schedule_range(
+                datetime(2026, 7, 18).date(),
+                datetime(2026, 7, 18).date(),
+                hydrate="probablePitcher,venue,team",
+            )
+        self.assertEqual(
+            request.call_args.args[1]["hydrate"],
+            "probablePitcher,venue,team",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-

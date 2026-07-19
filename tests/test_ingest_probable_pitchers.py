@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.ingest_probable_pitchers import (
     IngestionError,
@@ -288,6 +288,26 @@ class WriteTests(unittest.TestCase):
             )
         self.assertEqual(summary["games_found"], 0)
         self.assertEqual(summary["games_failed"], 0)
+
+    def test_injected_schedule_and_person_fetcher_avoid_standalone_requests(self):
+        game = sample_game(away_probable=False)
+        payload = {"dates": [{"games": [game]}]}
+        person_fetcher = Mock(return_value=person_payload(605483, "L"))
+        with patch("scripts.ingest_probable_pitchers.fetch_schedule") as schedule:
+            summary = ingest_date(
+                None,
+                date(2026, 7, 17),
+                "R",
+                True,
+                30.0,
+                2,
+                schedule_payload=payload,
+                person_fetcher=person_fetcher,
+            )
+        schedule.assert_not_called()
+        person_fetcher.assert_called_once_with(605483, 30.0, 2)
+        self.assertEqual(summary["assignments_found"], 1)
+        self.assertEqual(summary["people_failed"], 0)
 
 
 class EndpointTests(unittest.TestCase):

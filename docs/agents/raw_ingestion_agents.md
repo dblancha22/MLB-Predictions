@@ -17,10 +17,11 @@ This project should treat the existing notebook as a modeling prototype, not as 
   physical-request metrics when changing postgame ingestion.
 - Keep `scripts/ingest_games_raw.py`, `scripts/ingest_team_game_logs.py`, and
   `scripts/ingest_pitcher_game_logs.py` usable as targeted recovery commands.
-- Upcoming games are not routinely written to `games_raw`.
-  `scripts/ingest_probable_pitchers.py` is the separately documented pregame
-  workflow: it synchronizes only MLB `Preview` assignments without creating
-  future `games_raw` rows.
+- `scripts/ingest_pregame.py` is the routine same-day pregame workflow. It
+  shares one schedule payload while loading every game for today's MLB schedule
+  date into `games_raw`, then synchronizing only MLB `Preview` probable-pitcher
+  assignments. The standalone games and probable-pitcher writers remain
+  available for targeted recovery.
 
 ## Agent Roles
 
@@ -72,7 +73,9 @@ Responsibilities:
 - Maintain `docs/ingestion/raw_data_plan.md`.
 - Define ingestion order, idempotency rules, and update windows.
 - Keep the previous-day `ingest_postgame.py` results/log workflow separate from
-  the `ingest_probable_pitchers.py` pregame job.
+  the same-day `ingest_pregame.py` schedule/probable workflow.
+- Preserve pregame dependency ordering: `games_raw`, then `probable_pitchers`,
+  then the future `pregame_team_features` stage when it is implemented.
 - Maintain the shared request budget: one schedule response per bounded chunk
   and one boxscore response per unique final game in a process run.
 - Preserve dependency ordering: `games_raw`, then `team_game_logs`, then
@@ -86,6 +89,7 @@ Key questions this agent answers:
 - What should a postgame/yesterday update do?
 - How do we safely rerun the same date?
 - Does a change preserve shared-payload reuse and request-count observability?
+- Does a failed pregame games stage prevent dependent pregame stages?
 - Which tables should be populated in the first implementation slice?
 
 ## Collaboration Rules For Future Codex Work

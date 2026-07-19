@@ -79,12 +79,17 @@ def build_date_range(
 
 def resolve_yesterday(timezone_name: str, now: Optional[datetime] = None) -> date:
     """Resolve the previous local calendar date in an explicit IANA timezone."""
+    return resolve_today(timezone_name, now) - timedelta(days=1)
+
+
+def resolve_today(timezone_name: str, now: Optional[datetime] = None) -> date:
+    """Resolve the current local calendar date in an explicit IANA timezone."""
     try:
         timezone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError as exc:
         raise IngestionError(f"unknown IANA timezone {timezone_name!r}") from exc
     current = datetime.now(timezone) if now is None else now.astimezone(timezone)
-    return current.date() - timedelta(days=1)
+    return current.date()
 
 
 def validate_runtime_options(timeout: float, retries: int) -> None:
@@ -122,4 +127,3 @@ def create_supabase_client(env_file: Path) -> Any:
             "python -m pip install -r requirements-ingestion.txt"
         ) from exc
     return create_client(supabase_url, secret_key)
-

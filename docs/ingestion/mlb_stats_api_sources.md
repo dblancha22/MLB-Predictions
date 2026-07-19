@@ -118,6 +118,10 @@ Observed fields useful for `probable_pitchers`:
 
 Observed limitations:
 
+- `scripts/ingest_pregame.py` hydrates `probablePitcher,venue,team` once per
+  bounded pregame date chunk. The same source-date payload first populates
+  `games_raw` and then synchronizes `probable_pitchers`; person and missing-
+  venue lookups use the same run-scoped MLB client.
 - `scripts/ingest_postgame.py` hydrates `venue,team` once per bounded postgame
   date chunk and splits the response back into MLB source-date entries before
   applying postponement and resumption rules.
@@ -128,6 +132,9 @@ Observed limitations:
   `status.abstractGameState=Preview`. A valid missing probable deletes an
   existing row for that game/team; live/final games and malformed responses do
   not clear assignments.
+- The pregame games stage intentionally writes every schedule occurrence for
+  its requested date, not only `Preview` games. This keeps `games_raw` current
+  if the command runs after a status change; the probable stage remains strict.
 - July 17 included a Boston/Tampa Bay doubleheader. The two games had different
   `gamePk` values, and one response contained an away probable while the other
   contained no probable assignments, confirming that synchronization must key
@@ -214,6 +221,8 @@ Observed fields useful for `team_game_logs`:
 - `teams.{home,away}.teamStats.batting.homeRuns`
 - `teams.{home,away}.teamStats.batting.strikeOuts`
 - `teams.{home,away}.teamStats.batting.baseOnBalls`
+- `teams.{home,away}.teamStats.batting.hitByPitch`
+- `teams.{home,away}.teamStats.batting.sacFlies`
 - `teams.{home,away}.teamStats.batting.plateAppearances`
 - `teams.{home,away}.teamStats.batting.atBats`
 - `teams.{home,away}.teamStats.batting.totalBases`

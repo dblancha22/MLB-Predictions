@@ -38,6 +38,8 @@ def batting_stats(**overrides):
         "homeRuns": 3,
         "strikeOuts": 9,
         "baseOnBalls": 5,
+        "hitByPitch": 1,
+        "sacFlies": 2,
         "plateAppearances": 38,
         "atBats": 32,
         "totalBases": 20,
@@ -105,6 +107,8 @@ class TransformTests(unittest.TestCase):
         self.assertEqual(home["runs_scored"], 10)
         self.assertEqual(home["home_runs"], 3)
         self.assertEqual(home["walks"], 5)
+        self.assertEqual(home["hit_by_pitch"], 1)
+        self.assertEqual(home["sacrifice_flies"], 2)
         self.assertEqual(home["grounded_into_double_play"], 0)
         self.assertEqual(away["team_id"], 143)
         self.assertEqual(away["opponent_id"], 116)
@@ -116,6 +120,15 @@ class TransformTests(unittest.TestCase):
         del boxscore["teams"]["home"]["teamStats"]["batting"]["hits"]
         with self.assertRaises(IngestionError):
             transform_team_game_rows(sample_schedule_game(), boxscore)
+
+    def test_zero_hit_by_pitch_and_sacrifice_flies_are_preserved(self):
+        boxscore = sample_boxscore()
+        boxscore["teams"]["home"]["teamStats"]["batting"].update(
+            hitByPitch=0, sacFlies=0
+        )
+        home = transform_team_game_rows(sample_schedule_game(), boxscore)[0]
+        self.assertEqual(home["hit_by_pitch"], 0)
+        self.assertEqual(home["sacrifice_flies"], 0)
 
     def test_schedule_and_boxscore_team_mismatch_rejects_game(self):
         with self.assertRaises(IngestionError):

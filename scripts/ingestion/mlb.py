@@ -102,12 +102,16 @@ class MLBStatsClient:
         return payload
 
     def fetch_schedule_range(
-        self, start_date: date, end_date: date, game_type: str = "R"
+        self,
+        start_date: date,
+        end_date: date,
+        game_type: str = "R",
+        hydrate: str = "venue,team",
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
             "sportId": 1,
             "gameType": game_type,
-            "hydrate": "venue,team",
+            "hydrate": hydrate,
         }
         if start_date == end_date:
             params["date"] = start_date.isoformat()

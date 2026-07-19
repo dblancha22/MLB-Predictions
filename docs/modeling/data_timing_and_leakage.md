@@ -4,22 +4,26 @@ This document defines timing rules for future derived stats, feature tables, mod
 
 ## Current Ingestion Cadence
 
-The routine morning `scripts/ingest_postgame.py` workflow processes only the
-previous calendar day and populates `games_raw`, `team_game_logs`, and
-`pitcher_game_logs` in dependency order. Historical date ranges are used only
-for backfills, recovery, and audits.
+The routine morning workflow has separate pregame and postgame commands:
+
+- `scripts/ingest_pregame.py --today` loads today's schedule into `games_raw`
+  and then refreshes `probable_pitchers` from one shared schedule response.
+- `scripts/ingest_postgame.py --yesterday` processes the previous calendar day
+  and updates `games_raw`, `team_game_logs`, and `pitcher_game_logs` in
+  dependency order. Historical postgame ranges remain for backfills, recovery,
+  and audits.
 
 Therefore:
 
-- `games_raw` normally receives a game after its scheduled day, not as a
-  same-day pregame schedule feed.
-- Today's and future matchups must come from a separately documented pregame
-  source or table if prediction work needs them.
+- `games_raw` receives today's games before feature generation and the same
+  canonical rows are updated after finalization.
 - The postgame workflow remains rerunnable, timestamp-aware, and safe across
   explicit backfill ranges.
-- `probable_pitchers` has a separate pregame writer for today's or explicitly
-  requested future MLB schedule dates. It does not require or create future
-  `games_raw` rows.
+- `probable_pitchers` remains a latest-state table and its standalone writer
+  remains available for targeted recovery. The orchestrated games stage now
+  creates the parent `games_raw` rows needed by `pregame_team_features`.
+- `pregame_team_features` population remains unimplemented. When added, it must
+  run only after both current pregame stages succeed.
 
 ## Timing Categories
 
@@ -81,6 +85,25 @@ For completed historical training rows:
 - The label/target can use final result data.
 - The feature row and target row should be conceptually separate.
 
+## Pregame Feature Snapshots
+
+`pregame_team_features` preserves one feature row per game/team. Every row must
+store:
+
+- `feature_cutoff_at`, defining the latest allowed source information
+- `scheduled_start_time_at_cutoff`, preserving the mutable scheduled start that
+  was known when features were computed
+- `computed_at`, recording when the calculation ran
+- `feature_schema_version`, identifying the calculation definitions
+
+The primary key is `(game_id, team_id)`. The schema version is metadata, not a
+second row dimension. Adding future features populates new columns on the
+existing row.
+
+Probable-pitcher ID, hand, and entering ERA are copied into the feature row so
+later changes to the latest-state `probable_pitchers` table cannot alter the
+training record.
+
 ## Doubleheaders
 
 Doubleheaders need special handling.
@@ -91,7 +114,9 @@ Game 1:
 
 Game 2:
 
-- May use game 1 information only if game 1 was completed before the game 2 prediction cutoff.
+- Version 1 must not use same-day game 1 information.
+- A future version may use game 1 only if a trustworthy timestamp proves it was
+  completed before the game 2 prediction cutoff.
 - Bullpen and lineup/catcher rest effects may make game 2 meaningfully different.
 
 Current raw schema:

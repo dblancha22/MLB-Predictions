@@ -124,6 +124,8 @@ STAT_COLUMNS = {
     "home_runs": "homeRuns",
     "strikeouts": "strikeOuts",
     "walks": "baseOnBalls",
+    "hit_by_pitch": "hitByPitch",
+    "sacrifice_flies": "sacFlies",
     "plate_appearances": "plateAppearances",
     "at_bats": "atBats",
     "total_bases": "totalBases",

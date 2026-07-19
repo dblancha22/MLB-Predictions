@@ -88,6 +88,9 @@ Implemented on 2026-07-14:
   `scripts/ingest_pitcher_game_logs.py`.
 - It upserts by `(game_id, team_id)` and produces home and away rows with the
   other club stored as `opponent_id`.
+- It stores MLB `hitByPitch` and `sacFlies` as `hit_by_pitch` and
+  `sacrifice_flies`, completing the raw inputs required for exact downstream
+  OBP and OPS calculations.
 - It accepts MLB's final coded game state, including completed-early games whose
   specific `statusCode` is not exactly `F`.
 - If one boxscore or transform fails, the script processes other games, logs the
@@ -121,6 +124,14 @@ Season-to-date backfill completed on 2026-07-14:
 - Confirmed that suspended game `gamePk=824912`, which appears as final on both
   its original and resume-date schedule responses, safely converges on one pair
   of canonical rows.
+
+OPS-input extension completed on 2026-07-18:
+
+- Added `hit_by_pitch` and `sacrifice_flies` through migration
+  `add_team_game_logs_ops_inputs` (`20260719000353`).
+- Backfilled all 2,888 existing rows from `2026-03-25` through `2026-07-12`.
+- Verified zero nulls, negative values, or duplicate composite keys after the
+  backfill and matched sampled stored values to MLB boxscore fields.
 
 ## Pitcher Game Logs Implementation
 
@@ -210,6 +221,38 @@ Initial live validation completed on 2026-07-14:
   table contained 786 rows and 786 distinct `(game_id, team_id)` keys after the
   validation write.
 
+## Shared Pregame Orchestration
+
+Implemented on 2026-07-18:
+
+- `scripts/ingest_pregame.py` is the routine same-day entry point for
+  `games_raw` and `probable_pitchers`.
+- `--today` resolves the current calendar date in `America/Los_Angeles` by
+  default. Explicit dates and short ranges remain available for testing and
+  targeted recovery.
+- One `/schedule` response hydrated with `probablePitcher,venue,team` is shared
+  across both stages for each bounded date chunk.
+- The games stage writes every schedule occurrence for the target date. The
+  probable-pitcher stage remains restricted to MLB `Preview` games.
+- Missing venues and pitcher hands use the same run-scoped MLB client, and the
+  command reports physical request and cache-hit totals.
+- The games stage runs first. If it fails for a date, the probable-pitcher stage
+  is skipped for that date. Probable transform or person-enrichment failures
+  make the final command exit nonzero while preserving safe writes for retry.
+- `--steps games` and `--steps probable-pitchers` remain available for targeted
+  recovery. The table-specific scripts also remain supported.
+- The future `pregame_team_features` stage is intentionally not implemented by
+  this command yet.
+
+Commands:
+
+```bash
+python scripts/ingest_pregame.py --today
+python scripts/ingest_pregame.py --today --dry-run
+python scripts/ingest_pregame.py --date YYYY-MM-DD
+python scripts/ingest_pregame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+```
+
 ## Shared Postgame Orchestration
 
 Implemented on 2026-07-15:
@@ -265,7 +308,15 @@ Live validation completed on 2026-07-15:
 
 ## Morning Workflow
 
-The routine morning postgame job processes only the previous calendar day:
+Run the same-day pregame job first:
+
+1. Run `python scripts/ingest_pregame.py --today`.
+2. Request today's MLB schedule once with probable pitchers, venues, and teams.
+3. Insert missing team or venue identities and upsert every game occurrence
+   into `games_raw`.
+4. Synchronize probable-pitcher assignments for games still in `Preview`.
+
+The separate postgame job processes only the previous calendar day:
 
 1. Run `python scripts/ingest_postgame.py --yesterday`.
 2. Request yesterday's MLB schedule once.
@@ -276,10 +327,9 @@ The routine morning postgame job processes only the previous calendar day:
 6. Populate `team_game_logs` and `pitcher_game_logs` from shared boxscores.
 7. Mark pitcher logs processed after each complete pitcher row set writes.
 
-Do not routinely upsert today's or future games into `games_raw`. Inclusive date
-ranges are reserved for historical backfills, recovery, and explicit audits.
-The separately documented `probable_pitchers` workflow handles pregame pitcher
-assignments without changing this cadence.
+The routine pregame command loads today. Explicit short pregame ranges are for
+testing and recovery; broad postgame ranges remain reserved for historical
+backfills, recovery, and explicit audits.
 
 After the previous-day `games_raw` update succeeds, the orchestrator runs the
 team-log stage for that same previous calendar day. A nonzero exit must be
@@ -294,10 +344,9 @@ complete pitcher row set is written. `scripts/ingest_pitcher_game_logs.py`
 remains available for recovery. A final marker failure leaves idempotently
 written rows in place and causes a nonzero exit.
 
-The probable-pitcher workflow is separate from this previous-day sequence. Run
-`scripts/ingest_probable_pitchers.py` for today's MLB schedule date, and refresh
-it before first pitch as operational scheduling permits. It must not add today's
-or future games to `games_raw`.
+The pregame workflow is separate from this previous-day sequence and may be
+refreshed before first pitch as operational scheduling permits. Its first stage
+creates the `games_raw` parent rows required by the future feature writer.
 
 ## Suggested Ingestion Order
 

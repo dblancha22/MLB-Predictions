@@ -4,13 +4,20 @@ Project inspected: `BagBrainOfficial`
 
 Project ID: `soakgdpuvtxadjextekg`
 
-Inspection date: 2026-07-14
+Latest schema inspection: 2026-07-18. Existing row-count observations retain
+their individually stated inspection dates.
 
 This catalog reflects the current public schema as inspected through the Supabase connector. It should be refreshed whenever migrations are applied.
 
 ## Security Note
 
-Supabase reported Row Level Security disabled on all listed public tables. This can be acceptable for private service-role ingestion, but it is risky if anon or authenticated client keys can access these tables.
+Supabase reported Row Level Security disabled on the existing raw public tables.
+This can be acceptable for private service-role ingestion, but it is risky if
+anon or authenticated client keys can access these tables.
+
+`pregame_team_features` was created with RLS enabled and no client policies. It
+is closed to `anon` and `authenticated` access while its service-role writer is
+being developed.
 
 Do not enable RLS blindly. Enabling RLS without policies can block expected access. Before exposing data to frontend/client code, define access policies intentionally.
 
@@ -95,7 +102,8 @@ Ingestion notes:
 
 ### `public.games_raw`
 
-Purpose: previous-day game schedule/result table plus explicit historical backfills.
+Purpose: canonical MLB game schedule/result table. Rows are created pregame for
+the current schedule and updated postgame with final state and scores.
 
 Observed row count: 1,444 as of 2026-07-14, covering `2026-03-25` through
 `2026-07-12`. This is the unique `game_id` count after documented cross-date
@@ -151,6 +159,8 @@ Ingestion notes:
 - Use MLB `gamePk` as `game_id`.
 - `scripts/ingest_postgame.py` is the routine postgame orchestrator and invokes
   the `games_raw` writer with a shared schedule payload.
+- `scripts/ingest_pregame.py` is the routine same-day pregame orchestrator. It
+  creates today's canonical game rows before synchronizing probable pitchers.
 - `scripts/ingest_games_raw.py` remains the standalone writer for targeted
   recovery.
 - `doubleheader_code` preserves MLB's `doubleHeader` source code rather than
@@ -161,12 +171,11 @@ Ingestion notes:
   postponements remain on the requested date.
 - Suspended games repeated on a resume date retain their original `game_date`,
   scheduled time, and series metadata while accepting later status/score updates.
-- Routine morning runs should request and upsert only the previous calendar day.
-- Date ranges are for historical backfills, recovery, and explicit audits, not
-  the normal daily cadence.
-- `games_raw` is not the routine source for today's or future matchups. The
-  separate `ingest_probable_pitchers.py` pregame workflow does not create future
-  `games_raw` rows.
+- Routine pregame runs request today; routine postgame runs request yesterday.
+  Explicit short pregame ranges are for testing and recovery, while broad
+  postgame ranges remain for historical backfills, recovery, and audits.
+- Pregame upserts include every schedule occurrence for the requested source
+  date and omit score fields until MLB reports the configured final status.
 - `pitcher_logs_processed` is ingestion bookkeeping for the pitcher-log stage
   used by both `scripts/ingest_postgame.py` and the standalone
   `scripts/ingest_pitcher_game_logs.py` command, not a modeling feature.
@@ -186,9 +195,9 @@ The four new rows matched MLB pitcher IDs, names, and hand codes.
 
 Primary key: `(game_id, team_id)`
 
-Foreign keys: none. In particular, `game_id` does not reference `games_raw`, so
-today's and future probable assignments do not require changing the
-previous-day `games_raw` cadence.
+Foreign keys: none. The routine pregame orchestrator nevertheless writes
+`games_raw` first because its future feature-table stage requires that parent
+row and because the shared ordering makes failures explicit.
 
 Important columns:
 
@@ -203,6 +212,8 @@ Ingestion notes:
 
 - Prefer MLB schedule `probablePitcher` fields when available.
 - `scripts/ingest_probable_pitchers.py` is the current writer.
+- `scripts/ingest_pregame.py` is the routine entry point and passes its shared
+  combined schedule payload into this writer.
 - Process only games with `status.abstractGameState=Preview`.
 - Morning rows are mutable because probable pitchers can change. Upsert
   announced assignments by `(game_id, team_id)`.
@@ -250,6 +261,8 @@ Important columns:
 - `home_runs integer`
 - `strikeouts integer`
 - `walks integer`
+- `hit_by_pitch integer`
+- `sacrifice_flies integer`
 - `plate_appearances integer`
 - `at_bats integer`
 - `total_bases integer`
@@ -272,6 +285,13 @@ Ingestion notes:
   this includes `statusCode=FR` / `Completed Early` games.
 - The completed backfill audit found no duplicate keys, missing mapped stats,
   invalid team/opponent pairs, negative values, or score mismatches.
+- `hit_by_pitch` and `sacrifice_flies` preserve MLB boxscore
+  `hitByPitch` and `sacFlies` so exact aggregate-window OBP and OPS can be
+  calculated downstream.
+- Both columns were added on 2026-07-18 through migration
+  `add_team_game_logs_ops_inputs` (`20260719000353`). The full documented
+  2026 season-to-date range was backfilled, leaving zero nulls across 2,888
+  rows.
 
 ### `public.pitcher_game_logs`
 
@@ -335,6 +355,83 @@ Ingestion notes:
 - The completed backfill audit found no duplicate keys, missing required stats,
   negative values, invalid game/team pairs, missing team coverage, or
   starter-count anomalies.
+
+### `public.pregame_team_features`
+
+Purpose: frozen, model-ready pregame features from each team's perspective.
+Normally contains exactly two rows per game.
+
+Created empty on 2026-07-18 through migration
+`create_pregame_team_features` (`20260718234709`). Population logic has not yet
+been implemented.
+
+Primary key: `(game_id, team_id)`
+
+Foreign keys:
+
+- `game_id` -> `games_raw.game_id`
+- `team_id` -> `teams.team_id`
+- `opponent_team_id` -> `teams.team_id`
+
+Indexes:
+
+- The primary-key index on `(game_id, team_id)` covers `game_id`.
+- `pregame_team_features_team_id_idx` covers `team_id`.
+- `pregame_team_features_opponent_team_id_idx` covers `opponent_team_id`.
+- `pregame_team_features_season_start_idx` covers
+  `(season, scheduled_start_time_at_cutoff)`.
+
+Important columns:
+
+- `game_id bigint`
+- `team_id integer`
+- `opponent_team_id integer`
+- `season smallint`
+- `scheduled_start_time_at_cutoff timestamptz`
+- `is_home boolean`
+- `feature_cutoff_at timestamptz`
+- `computed_at timestamptz`
+- `feature_schema_version smallint`
+- `runs_avg_last_5 double precision`
+- `hits_avg_last_5 double precision`
+- `ops_last_5 double precision`
+- `runs_avg_last_10 double precision`
+- `hits_avg_last_10 double precision`
+- `ops_last_10 double precision`
+- `opposing_probable_pitcher_id integer`
+- `opposing_pitcher_season_era double precision`
+- `opposing_pitcher_hand text`
+- `team_wins_before_game smallint`
+- `team_losses_before_game smallint`
+- `team_win_pct_before_game double precision` (generated)
+- `opponent_wins_before_game smallint`
+- `opponent_losses_before_game smallint`
+- `opponent_win_pct_before_game double precision` (generated)
+
+Feature notes:
+
+- `feature_schema_version` is metadata and is not part of uniqueness. Future
+  feature columns are populated on the existing game/team row.
+- Win percentages are generated from the stored wins and losses and are null
+  before either team has a decision.
+- Early-season rolling windows use all available same-season games. Separate
+  window sample-size columns are omitted because games played can be inferred
+  from wins and losses.
+- OPS is aggregate window OBP plus aggregate window SLG, not an average of
+  per-game OPS values. Exact population waits for the remaining raw OPS inputs.
+- Opposing pitcher ERA uses prior same-season earned runs and outs:
+  `earned_runs_allowed * 27 / outs_recorded`.
+- Version 1 excludes same-day Game 1 results from Game 2 features.
+- `scheduled_start_time_at_cutoff` preserves the mutable schedule value known
+  at calculation time.
+
+Security:
+
+- RLS is enabled.
+- No client policies exist; service-role ingestion remains possible.
+
+See [Pregame Team Features](../features/pregame_team_features.md) for the full
+population contract and prerequisites.
 
 ### `public.weather_raw`
 

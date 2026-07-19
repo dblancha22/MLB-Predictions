@@ -253,10 +253,15 @@ def ingest_date(
     dry_run: bool,
     timeout: float,
     retries: int,
+    schedule_payload: Optional[Mapping[str, Any]] = None,
+    person_fetcher: Optional[Any] = None,
 ) -> Dict[str, int]:
-    schedule_games = flatten_schedule(
+    payload = (
         fetch_schedule(target_date, game_type, timeout, retries)
+        if schedule_payload is None
+        else schedule_payload
     )
+    schedule_games = flatten_schedule(payload)
     eligible_games = pregame_games(schedule_games)
     summary = {
         "games_found": len(schedule_games),
@@ -289,11 +294,12 @@ def ingest_date(
 
     summary["assignments_found"] = len(rows)
     summary["assignments_missing"] = len(missing_assignments)
+    get_person = fetch_person if person_fetcher is None else person_fetcher
     hands: Dict[int, Optional[str]] = {}
     for pitcher_id in sorted({int(row["pitcher_id"]) for row in rows}):
         try:
             hands[pitcher_id] = extract_pitch_hand(
-                fetch_person(pitcher_id, timeout, retries), pitcher_id
+                get_person(pitcher_id, timeout, retries), pitcher_id
             )
         except Exception as exc:
             summary["people_failed"] += 1

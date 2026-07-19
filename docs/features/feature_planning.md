@@ -20,6 +20,18 @@ Run line/spread may be useful later, but it is not a current design driver.
 
 Collect richer raw data than the first model needs. Derived features can start simple, but raw ingestion should preserve enough game, team, pitcher, venue, and eventually odds context to support more complex features later.
 
+## Implemented Feature Storage
+
+`public.pregame_team_features` was created on 2026-07-18 as the first derived
+feature table. It stores one team-perspective row per game/team, normally two
+rows per game, with primary key `(game_id, team_id)`.
+
+The initial columns cover rolling runs, hits, aggregate OPS, opposing probable
+pitcher ERA and hand, pregame team/opponent records, and home/away context.
+Population is not implemented yet. See
+[Pregame Team Features](pregame_team_features.md) for the exact schema and
+feature rules.
+
 ## Candidate Feature Families
 
 ### Team Performance
@@ -44,7 +56,9 @@ Potential features:
 Timing notes:
 
 - Features must use only games completed before the target game.
-- Doubleheaders need careful handling because game 2 may be able to use game 1 if game 1 is final before game 2.
+- The first feature writer will exclude same-day Game 1 results from Game 2.
+- Early-season windows use the available same-season games; games played is
+  inferred from the stored pregame wins and losses.
 
 ### Starting Pitcher Form
 
@@ -69,6 +83,8 @@ Important raw design note:
 
 - Use `outs_recorded` as the canonical workload field.
 - Do not treat MLB innings notation as decimal math.
+- The initial opposing-pitcher ERA feature is season-to-date ERA entering the
+  game: `earned_runs_allowed * 27 / outs_recorded`.
 
 ### Bullpen Usage And Fatigue
 
@@ -179,4 +195,3 @@ Current status:
 - Whether odds should eventually be a model input, a post-model comparison tool, or both.
 - What exact cutoff time should define "known before prediction" once run cadence is decided.
 - Whether run line/spread should become a first-class target later.
-

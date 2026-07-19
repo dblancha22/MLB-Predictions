@@ -21,9 +21,9 @@ Use this checklist before considering a raw ingestion script ready.
 - The command supports a single date.
 - The command supports a date range before broad backfills.
 - The routine results/log invocation targets only the previous calendar day.
-- The separate probable-pitcher invocation supports today's date and explicit
-  short future ranges; results/log date ranges remain reserved for backfills,
-  recovery, and audits.
+- The pregame invocation supports `--today`, explicit dates, and short future
+  ranges; results/log date ranges remain reserved for backfills, recovery, and
+  audits.
 
 ## Idempotency
 
@@ -45,6 +45,20 @@ Use this checklist before considering a raw ingestion script ready.
 - Physical MLB request and cache-hit totals are logged.
 - A failed games stage skips dependent stages for that date.
 - Existing table-specific commands remain usable for targeted recovery.
+
+## Shared Pregame Workflow
+
+- `--today` resolves through an explicit logged IANA timezone and defaults to
+  `America/Los_Angeles`.
+- The games and probable-pitcher stages share one schedule payload hydrated with
+  `probablePitcher,venue,team` per bounded date chunk.
+- The games stage runs before the probable-pitcher stage.
+- A failed games stage skips the probable-pitcher stage for that date.
+- A malformed probable game or failed person enrichment makes the command exit
+  nonzero while preserving safe writes for retry.
+- Physical MLB request and cache-hit totals are logged.
+- `--steps games` and `--steps probable-pitchers` support targeted recovery.
+- The future feature stage is not yet implemented.
 
 ## Current Raw Tables
 
@@ -71,7 +85,8 @@ Use this checklist before considering a raw ingestion script ready.
 - Stores status.
 - Stores MLB doubleheader code, game number, series game number, and games in series.
 - Updates final scores after games complete.
-- Does not routinely load today's or future schedule.
+- Routinely loads today's schedule through `scripts/ingest_pregame.py` and
+  accepts explicit short future ranges for testing or recovery.
 - Handles no-game dates without failure.
 - Handles doubleheaders by `game_id` and preserves their source metadata.
 - Deduplicates suspended/resumed occurrences by `game_id` and preserves the
@@ -100,6 +115,7 @@ Use this checklist before considering a raw ingestion script ready.
   the more specific `statusCode` is not exactly `F`.
 - Produces two rows per completed game when boxscore data is available.
 - Uses team and opponent IDs.
+- Stores MLB team batting `hitByPitch` and `sacFlies` as integer raw values.
 - Does not calculate derived rolling stats.
 - Continues other games after a game-level source/transform failure and exits
   nonzero when any game failed.
