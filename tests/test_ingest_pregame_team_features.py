@@ -3,10 +3,16 @@ import unittest
 from datetime import date, datetime, timezone
 
 from scripts.ingest_pregame_team_features import (
+    GAME_COLUMNS,
     MODE_HISTORICAL,
     MODE_LIVE,
+    PITCHER_LOG_COLUMNS,
+    PROBABLE_COLUMNS,
+    TEAM_LOG_COLUMNS,
     IngestionError,
     build_feature_rows,
+    ingest_features,
+    load_feature_source_rows,
     paginated_select,
     resolve_target_dates,
     upsert_game_features,
@@ -70,6 +76,118 @@ COMPUTED = datetime(2026, 7, 18, 20, 0, tzinfo=timezone.utc)
 
 
 class FeatureCalculationTests(unittest.TestCase):
+    def test_complete_rows_preserve_contract_and_team_order(self):
+        prior = game(1, "2026-04-01", 10, 20)
+        target = game(
+            2,
+            "2026-04-02",
+            10,
+            20,
+            scheduled="2026-04-02T20:00:00+00:00",
+            status="Scheduled",
+            scores=False,
+        )
+        pitcher_logs = [
+            {
+                "game_id": 1,
+                "pitcher_id": 88,
+                "outs_recorded": 9,
+                "earned_runs_allowed": 1,
+            },
+            {
+                "game_id": 1,
+                "pitcher_id": 99,
+                "outs_recorded": 18,
+                "earned_runs_allowed": 2,
+            },
+        ]
+        probables = [
+            {
+                "game_id": 2,
+                "team_id": 10,
+                "pitcher_id": 88,
+                "pitch_hand": "R",
+                "capture_type": "pregame",
+                "updated_at": "2026-04-02T18:00:00+00:00",
+            },
+            {
+                "game_id": 2,
+                "team_id": 20,
+                "pitcher_id": 99,
+                "pitch_hand": "L",
+                "capture_type": "pregame",
+                "updated_at": "2026-04-02T18:00:00+00:00",
+            },
+        ]
+
+        result = build_feature_rows(
+            [prior, target],
+            team_logs(1, 10, 20),
+            pitcher_logs,
+            probables,
+            season=2026,
+            game_type="R",
+            target_dates=(date(2026, 4, 2),),
+            mode=MODE_HISTORICAL,
+            computed_at=COMPUTED,
+        )
+
+        home_ops = (8 + 2 + 1) / (30 + 2 + 1 + 1) + 12 / 30
+        away_ops = (6 + 2 + 1) / (30 + 2 + 1 + 1) + 9 / 30
+        self.assertEqual(
+            result.rows_by_game[2],
+            [
+                {
+                    "game_id": 2,
+                    "team_id": 10,
+                    "opponent_team_id": 20,
+                    "season": 2026,
+                    "scheduled_start_time_at_cutoff": "2026-04-02T20:00:00+00:00",
+                    "is_home": True,
+                    "feature_cutoff_at": "2026-04-02T20:00:00+00:00",
+                    "computed_at": COMPUTED.isoformat(),
+                    "feature_schema_version": 1,
+                    "runs_avg_last_5": 5.0,
+                    "hits_avg_last_5": 8.0,
+                    "ops_last_5": home_ops,
+                    "runs_avg_last_10": 5.0,
+                    "hits_avg_last_10": 8.0,
+                    "ops_last_10": home_ops,
+                    "opposing_probable_pitcher_id": 99,
+                    "opposing_pitcher_season_era": 3.0,
+                    "opposing_pitcher_hand": "L",
+                    "team_wins_before_game": 1,
+                    "team_losses_before_game": 0,
+                    "opponent_wins_before_game": 0,
+                    "opponent_losses_before_game": 1,
+                },
+                {
+                    "game_id": 2,
+                    "team_id": 20,
+                    "opponent_team_id": 10,
+                    "season": 2026,
+                    "scheduled_start_time_at_cutoff": "2026-04-02T20:00:00+00:00",
+                    "is_home": False,
+                    "feature_cutoff_at": "2026-04-02T20:00:00+00:00",
+                    "computed_at": COMPUTED.isoformat(),
+                    "feature_schema_version": 1,
+                    "runs_avg_last_5": 3.0,
+                    "hits_avg_last_5": 6.0,
+                    "ops_last_5": away_ops,
+                    "runs_avg_last_10": 3.0,
+                    "hits_avg_last_10": 6.0,
+                    "ops_last_10": away_ops,
+                    "opposing_probable_pitcher_id": 88,
+                    "opposing_pitcher_season_era": 3.0,
+                    "opposing_pitcher_hand": "R",
+                    "team_wins_before_game": 0,
+                    "team_losses_before_game": 1,
+                    "opponent_wins_before_game": 1,
+                    "opponent_losses_before_game": 0,
+                },
+            ],
+        )
+
     def test_first_game_has_null_rolling_values_and_zero_record(self):
         target = game(
             1,
@@ -360,6 +478,95 @@ class FakeClient:
 
 
 class SupabaseBehaviorTests(unittest.TestCase):
+    def test_source_reads_preserve_columns_filters_and_ordering(self):
+        target = game(
+            1,
+            "2026-04-01",
+            10,
+            20,
+            status="Scheduled",
+            scores=False,
+        )
+        client = FakeClient(
+            {
+                "games_raw": [target],
+                "team_game_logs": [],
+                "pitcher_game_logs": [],
+                "probable_pitchers": [],
+            }
+        )
+
+        load_feature_source_rows(client, 2026, "R")
+
+        self.assertEqual(
+            [call for call in client.calls if call[0] == "select"],
+            [
+                ("select", "games_raw", GAME_COLUMNS),
+                ("select", "team_game_logs", TEAM_LOG_COLUMNS),
+                ("select", "pitcher_game_logs", PITCHER_LOG_COLUMNS),
+                ("select", "probable_pitchers", PROBABLE_COLUMNS),
+            ],
+        )
+        self.assertEqual(
+            [call for call in client.calls if call[0] == "eq"],
+            [
+                ("eq", "games_raw", "season", 2026),
+                ("eq", "games_raw", "game_type", "R"),
+            ],
+        )
+        self.assertEqual(
+            [call for call in client.calls if call[0] == "order"],
+            [
+                ("order", "games_raw", "game_id"),
+                ("order", "team_game_logs", "game_id"),
+                ("order", "team_game_logs", "team_id"),
+                ("order", "pitcher_game_logs", "game_id"),
+                ("order", "pitcher_game_logs", "pitcher_id"),
+                ("order", "probable_pitchers", "game_id"),
+                ("order", "probable_pitchers", "team_id"),
+            ],
+        )
+
+    def test_dry_run_preserves_summary_and_performs_no_upsert(self):
+        target = game(
+            1,
+            "2026-04-01",
+            10,
+            20,
+            status="Scheduled",
+            scores=False,
+        )
+        client = FakeClient(
+            {
+                "games_raw": [target],
+                "team_game_logs": [],
+                "pitcher_game_logs": [],
+                "probable_pitchers": [],
+            }
+        )
+
+        summary = ingest_features(
+            client,
+            season=2026,
+            game_type="R",
+            target_dates=(date(2026, 4, 1),),
+            mode=MODE_HISTORICAL,
+            dry_run=True,
+            computed_at=COMPUTED,
+        )
+
+        self.assertEqual(
+            summary,
+            {
+                "games_found": 1,
+                "games_skipped_started": 0,
+                "games_failed": 0,
+                "rows_ready": 2,
+                "rows_upserted": 0,
+            },
+        )
+        self.assertFalse(any(call[0] == "upsert" for call in client.calls))
+
     def test_paginated_select_reads_every_page(self):
         client = FakeClient({"source": [{"id": value} for value in range(5)]})
         rows = paginated_select(

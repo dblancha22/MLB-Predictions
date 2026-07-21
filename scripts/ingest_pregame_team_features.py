@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict
 
 try:
     from scripts.ingestion.common import (
@@ -57,9 +57,86 @@ PROBABLE_COLUMNS = (
 )
 
 
+class FeatureRow(TypedDict):
+    game_id: int
+    team_id: int
+    opponent_team_id: int
+    season: int
+    scheduled_start_time_at_cutoff: str
+    is_home: bool
+    feature_cutoff_at: str
+    computed_at: str
+    feature_schema_version: int
+    runs_avg_last_5: Optional[float]
+    hits_avg_last_5: Optional[float]
+    ops_last_5: Optional[float]
+    runs_avg_last_10: Optional[float]
+    hits_avg_last_10: Optional[float]
+    ops_last_10: Optional[float]
+    opposing_probable_pitcher_id: Optional[int]
+    opposing_pitcher_season_era: Optional[float]
+    opposing_pitcher_hand: Optional[str]
+    team_wins_before_game: int
+    team_losses_before_game: int
+    opponent_wins_before_game: int
+    opponent_losses_before_game: int
+
+
+class FeatureIngestSummary(TypedDict):
+    games_found: int
+    games_skipped_started: int
+    games_failed: int
+    rows_ready: int
+    rows_upserted: int
+
+
+@dataclass(frozen=True)
+class RollingOffense:
+    runs_avg: Optional[float]
+    hits_avg: Optional[float]
+    ops: Optional[float]
+
+
+@dataclass(frozen=True)
+class TeamFeatureValues:
+    runs_avg_last_5: Optional[float]
+    hits_avg_last_5: Optional[float]
+    ops_last_5: Optional[float]
+    runs_avg_last_10: Optional[float]
+    hits_avg_last_10: Optional[float]
+    ops_last_10: Optional[float]
+    wins: int
+    losses: int
+
+
+@dataclass(frozen=True)
+class OpposingPitcherFeatures:
+    pitcher_id: Optional[int]
+    era: Optional[float]
+    hand: Optional[str]
+
+
+@dataclass(frozen=True)
+class GameFeatureSnapshot:
+    game_id: int
+    season: int
+    scheduled_start: datetime
+    cutoff: datetime
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class FeatureContext:
+    games_by_id: Dict[int, Dict[str, Any]]
+    team_history: Dict[int, List[Dict[str, Any]]]
+    pitcher_history: Dict[int, List[Dict[str, Any]]]
+    probable_by_key: Dict[Tuple[int, int], Dict[str, Any]]
+    incomplete_by_team: Dict[int, List[Tuple[date, int]]]
+
+
 @dataclass
 class FeatureBuildResult:
-    rows_by_game: Dict[int, List[Dict[str, Any]]]
+    rows_by_game: Dict[int, List[FeatureRow]]
     games_found: int
     games_skipped_started: int
     games_failed: int
@@ -215,61 +292,9 @@ def _is_final_game(game: Mapping[str, Any]) -> bool:
     )
 
 
-def _rolling_values(
-    history: Sequence[Mapping[str, Any]], window_size: int
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    window = list(history[-window_size:])
-    if not window:
-        return None, None, None
-    runs = sum(int(row["runs_scored"]) for row in window) / len(window)
-    hits = sum(int(row["hits"]) for row in window) / len(window)
-    total_hits = sum(int(row["hits"]) for row in window)
-    walks = sum(int(row["walks"]) for row in window)
-    hit_by_pitch = sum(int(row["hit_by_pitch"]) for row in window)
-    sacrifice_flies = sum(int(row["sacrifice_flies"]) for row in window)
-    at_bats = sum(int(row["at_bats"]) for row in window)
-    total_bases = sum(int(row["total_bases"]) for row in window)
-    obp_denominator = at_bats + walks + hit_by_pitch + sacrifice_flies
-    if at_bats == 0 or obp_denominator == 0:
-        ops = None
-    else:
-        ops = (
-            (total_hits + walks + hit_by_pitch) / obp_denominator
-            + total_bases / at_bats
-        )
-    return runs, hits, ops
-
-
-def _record(history: Sequence[Mapping[str, Any]]) -> Tuple[int, int]:
-    wins = 0
-    losses = 0
-    for row in history:
-        runs = int(row["runs_scored"])
-        opponent_runs = int(row["opponent_runs"])
-        if runs > opponent_runs:
-            wins += 1
-        elif runs < opponent_runs:
-            losses += 1
-        else:
-            raise IngestionError(
-                f"tied regular-season result game_id={row['game_id']} "
-                f"team_id={row['team_id']}"
-            )
-    return wins, losses
-
-
-def _build_context(
+def _normalize_games(
     games: Sequence[Mapping[str, Any]],
-    team_logs: Sequence[Mapping[str, Any]],
-    pitcher_logs: Sequence[Mapping[str, Any]],
-    probables: Sequence[Mapping[str, Any]],
-) -> Tuple[
-    Dict[int, Dict[str, Any]],
-    Dict[int, List[Dict[str, Any]]],
-    Dict[int, List[Dict[str, Any]]],
-    Dict[Tuple[int, int], Dict[str, Any]],
-    Dict[int, List[Tuple[date, int]]],
-]:
+) -> Dict[int, Dict[str, Any]]:
     games_by_id: Dict[int, Dict[str, Any]] = {}
     for raw_game in games:
         game_id = _required_int(raw_game, "game_id", "games_raw")
@@ -283,7 +308,13 @@ def _build_context(
         if game["home_team_id"] == game["away_team_id"]:
             raise IngestionError(f"same home and away team for game_id={game_id}")
         games_by_id[game_id] = game
+    return games_by_id
 
+
+def _index_team_logs(
+    team_logs: Sequence[Mapping[str, Any]],
+    games_by_id: Mapping[int, Mapping[str, Any]],
+) -> Dict[int, List[Dict[str, Any]]]:
     logs_by_game: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for raw_log in team_logs:
         game_id = _required_int(raw_log, "game_id", "team_game_logs")
@@ -304,7 +335,16 @@ def _build_context(
         ):
             log[key] = _required_nonnegative_int(log, key, context)
         logs_by_game[game_id].append(log)
+    return logs_by_game
 
+
+def _build_team_history(
+    games_by_id: Mapping[int, Mapping[str, Any]],
+    logs_by_game: Mapping[int, Sequence[Mapping[str, Any]]],
+) -> Tuple[
+    Dict[int, List[Dict[str, Any]]],
+    Dict[int, List[Tuple[date, int]]],
+]:
     team_history: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     incomplete_by_team: Dict[int, List[Tuple[date, int]]] = defaultdict(list)
     for game_id, game in games_by_id.items():
@@ -340,7 +380,13 @@ def _build_context(
         history.sort(
             key=lambda row: (row["game_date"], row["sort_time"], row["game_id"])
         )
+    return team_history, incomplete_by_team
 
+
+def _build_pitcher_history(
+    pitcher_logs: Sequence[Mapping[str, Any]],
+    games_by_id: Mapping[int, Mapping[str, Any]],
+) -> Dict[int, List[Dict[str, Any]]]:
     pitcher_history: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for raw_log in pitcher_logs:
         game_id = _required_int(raw_log, "game_id", "pitcher_game_logs")
@@ -363,7 +409,13 @@ def _build_context(
         pitcher_history[pitcher_id].append(entry)
     for history in pitcher_history.values():
         history.sort(key=lambda row: (row["game_date"], row["game_id"]))
+    return pitcher_history
 
+
+def _index_probable_pitchers(
+    probables: Sequence[Mapping[str, Any]],
+    games_by_id: Mapping[int, Mapping[str, Any]],
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
     probable_by_key: Dict[Tuple[int, int], Dict[str, Any]] = {}
     for raw_probable in probables:
         game_id = _required_int(raw_probable, "game_id", "probable_pitchers")
@@ -375,25 +427,82 @@ def _build_context(
             probable, "pitcher_id", f"probable_pitchers[{game_id},{team_id}]"
         )
         probable_by_key[(game_id, team_id)] = probable
+    return probable_by_key
 
-    return (
-        games_by_id,
-        team_history,
-        pitcher_history,
-        probable_by_key,
-        incomplete_by_team,
+
+def _build_context(
+    games: Sequence[Mapping[str, Any]],
+    team_logs: Sequence[Mapping[str, Any]],
+    pitcher_logs: Sequence[Mapping[str, Any]],
+    probables: Sequence[Mapping[str, Any]],
+) -> FeatureContext:
+    games_by_id = _normalize_games(games)
+    logs_by_game = _index_team_logs(team_logs, games_by_id)
+    team_history, incomplete_by_team = _build_team_history(
+        games_by_id, logs_by_game
     )
+    pitcher_history = _build_pitcher_history(pitcher_logs, games_by_id)
+    probable_by_key = _index_probable_pitchers(probables, games_by_id)
+    return FeatureContext(
+        games_by_id=games_by_id,
+        team_history=team_history,
+        pitcher_history=pitcher_history,
+        probable_by_key=probable_by_key,
+        incomplete_by_team=incomplete_by_team,
+    )
+
+
+def _rolling_values(
+    history: Sequence[Mapping[str, Any]], window_size: int
+) -> RollingOffense:
+    window = list(history[-window_size:])
+    if not window:
+        return RollingOffense(runs_avg=None, hits_avg=None, ops=None)
+    runs = sum(int(row["runs_scored"]) for row in window) / len(window)
+    hits = sum(int(row["hits"]) for row in window) / len(window)
+    total_hits = sum(int(row["hits"]) for row in window)
+    walks = sum(int(row["walks"]) for row in window)
+    hit_by_pitch = sum(int(row["hit_by_pitch"]) for row in window)
+    sacrifice_flies = sum(int(row["sacrifice_flies"]) for row in window)
+    at_bats = sum(int(row["at_bats"]) for row in window)
+    total_bases = sum(int(row["total_bases"]) for row in window)
+    obp_denominator = at_bats + walks + hit_by_pitch + sacrifice_flies
+    if at_bats == 0 or obp_denominator == 0:
+        ops = None
+    else:
+        ops = (
+            (total_hits + walks + hit_by_pitch) / obp_denominator
+            + total_bases / at_bats
+        )
+    return RollingOffense(runs_avg=runs, hits_avg=hits, ops=ops)
+
+
+def _record(history: Sequence[Mapping[str, Any]]) -> Tuple[int, int]:
+    wins = 0
+    losses = 0
+    for row in history:
+        runs = int(row["runs_scored"])
+        opponent_runs = int(row["opponent_runs"])
+        if runs > opponent_runs:
+            wins += 1
+        elif runs < opponent_runs:
+            losses += 1
+        else:
+            raise IngestionError(
+                f"tied regular-season result game_id={row['game_id']} "
+                f"team_id={row['team_id']}"
+            )
+    return wins, losses
 
 
 def _prior_team_history(
     team_id: int,
     target_date: date,
-    team_history: Mapping[int, Sequence[Dict[str, Any]]],
-    incomplete_by_team: Mapping[int, Sequence[Tuple[date, int]]],
+    context: FeatureContext,
 ) -> List[Dict[str, Any]]:
     missing = [
         game_id
-        for game_date, game_id in incomplete_by_team.get(team_id, ())
+        for game_date, game_id in context.incomplete_by_team.get(team_id, ())
         if game_date < target_date
     ]
     if missing:
@@ -403,7 +512,7 @@ def _prior_team_history(
         )
     return [
         row
-        for row in team_history.get(team_id, ())
+        for row in context.team_history.get(team_id, ())
         if row["game_date"] < target_date
     ]
 
@@ -428,110 +537,146 @@ def _pitcher_era(
 def _team_feature_values(
     team_id: int,
     target_date: date,
-    team_history: Mapping[int, Sequence[Dict[str, Any]]],
-    incomplete_by_team: Mapping[int, Sequence[Tuple[date, int]]],
-) -> Dict[str, Any]:
-    history = _prior_team_history(
-        team_id, target_date, team_history, incomplete_by_team
-    )
+    context: FeatureContext,
+) -> TeamFeatureValues:
+    history = _prior_team_history(team_id, target_date, context)
     last_5 = _rolling_values(history, 5)
     last_10 = _rolling_values(history, 10)
     wins, losses = _record(history)
+    return TeamFeatureValues(
+        runs_avg_last_5=last_5.runs_avg,
+        hits_avg_last_5=last_5.hits_avg,
+        ops_last_5=last_5.ops,
+        runs_avg_last_10=last_10.runs_avg,
+        hits_avg_last_10=last_10.hits_avg,
+        ops_last_10=last_10.ops,
+        wins=wins,
+        losses=losses,
+    )
+
+
+def _opposing_pitcher_features(
+    game_id: int,
+    opponent_id: int,
+    target_date: date,
+    context: FeatureContext,
+) -> OpposingPitcherFeatures:
+    opposing_probable = context.probable_by_key.get((game_id, opponent_id))
+    if opposing_probable is None:
+        return OpposingPitcherFeatures(pitcher_id=None, era=None, hand=None)
+
+    pitcher_id = _required_int(
+        opposing_probable,
+        "pitcher_id",
+        f"probable_pitchers[{game_id},{opponent_id}]",
+    )
+    raw_hand = opposing_probable.get("pitch_hand")
+    pitcher_hand = str(raw_hand) if raw_hand is not None else None
+    if pitcher_hand not in {None, "R", "L", "S"}:
+        raise IngestionError(
+            f"invalid probable pitcher hand game_id={game_id} "
+            f"team_id={opponent_id} hand={pitcher_hand!r}"
+        )
+    return OpposingPitcherFeatures(
+        pitcher_id=pitcher_id,
+        era=_pitcher_era(pitcher_id, target_date, context.pitcher_history),
+        hand=pitcher_hand,
+    )
+
+
+def _build_team_feature_row(
+    *,
+    snapshot: GameFeatureSnapshot,
+    team_id: int,
+    opponent_id: int,
+    is_home: bool,
+    team_values: TeamFeatureValues,
+    opponent_values: TeamFeatureValues,
+    pitcher_features: OpposingPitcherFeatures,
+) -> FeatureRow:
     return {
-        "runs_avg_last_5": last_5[0],
-        "hits_avg_last_5": last_5[1],
-        "ops_last_5": last_5[2],
-        "runs_avg_last_10": last_10[0],
-        "hits_avg_last_10": last_10[1],
-        "ops_last_10": last_10[2],
-        "wins": wins,
-        "losses": losses,
+        "game_id": snapshot.game_id,
+        "team_id": team_id,
+        "opponent_team_id": opponent_id,
+        "season": snapshot.season,
+        "scheduled_start_time_at_cutoff": _iso_utc(snapshot.scheduled_start),
+        "is_home": is_home,
+        "feature_cutoff_at": _iso_utc(snapshot.cutoff),
+        "computed_at": _iso_utc(snapshot.computed_at),
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "runs_avg_last_5": team_values.runs_avg_last_5,
+        "hits_avg_last_5": team_values.hits_avg_last_5,
+        "ops_last_5": team_values.ops_last_5,
+        "runs_avg_last_10": team_values.runs_avg_last_10,
+        "hits_avg_last_10": team_values.hits_avg_last_10,
+        "ops_last_10": team_values.ops_last_10,
+        "opposing_probable_pitcher_id": pitcher_features.pitcher_id,
+        "opposing_pitcher_season_era": pitcher_features.era,
+        "opposing_pitcher_hand": pitcher_features.hand,
+        "team_wins_before_game": team_values.wins,
+        "team_losses_before_game": team_values.losses,
+        "opponent_wins_before_game": opponent_values.wins,
+        "opponent_losses_before_game": opponent_values.losses,
     }
 
 
 def build_game_feature_rows(
     game: Mapping[str, Any],
     *,
-    team_history: Mapping[int, Sequence[Dict[str, Any]]],
-    pitcher_history: Mapping[int, Sequence[Mapping[str, Any]]],
-    probable_by_key: Mapping[Tuple[int, int], Mapping[str, Any]],
-    incomplete_by_team: Mapping[int, Sequence[Tuple[date, int]]],
+    context: FeatureContext,
     mode: str,
     computed_at: datetime,
-) -> Optional[List[Dict[str, Any]]]:
+) -> Optional[List[FeatureRow]]:
     if mode not in MODES:
         raise IngestionError(f"unknown feature mode {mode!r}")
     if computed_at.tzinfo is None:
         raise IngestionError("computed_at must be timezone-aware")
     game_id = _required_int(game, "game_id", "games_raw")
-    context = f"games_raw[{game_id}]"
-    target_date = _required_date(game, "game_date", context)
-    scheduled_start = _required_datetime(game, "scheduled_time_utc", context)
+    game_context = f"games_raw[{game_id}]"
+    target_date = _required_date(game, "game_date", game_context)
+    scheduled_start = _required_datetime(
+        game, "scheduled_time_utc", game_context
+    )
     normalized_computed_at = computed_at.astimezone(timezone.utc)
     if mode == MODE_LIVE and normalized_computed_at >= scheduled_start:
         return None
     cutoff = scheduled_start if mode == MODE_HISTORICAL else normalized_computed_at
-    home_id = _required_int(game, "home_team_id", context)
-    away_id = _required_int(game, "away_team_id", context)
-    season = _required_int(game, "season", context)
+    home_id = _required_int(game, "home_team_id", game_context)
+    away_id = _required_int(game, "away_team_id", game_context)
+    season = _required_int(game, "season", game_context)
 
     values_by_team = {
-        team_id: _team_feature_values(
-            team_id, target_date, team_history, incomplete_by_team
-        )
+        team_id: _team_feature_values(team_id, target_date, context)
         for team_id in (home_id, away_id)
     }
-    rows: List[Dict[str, Any]] = []
+    snapshot = GameFeatureSnapshot(
+        game_id=game_id,
+        season=season,
+        scheduled_start=scheduled_start,
+        cutoff=cutoff,
+        computed_at=normalized_computed_at,
+    )
+    rows: List[FeatureRow] = []
     for team_id, opponent_id, is_home in (
         (home_id, away_id, True),
         (away_id, home_id, False),
     ):
         team_values = values_by_team[team_id]
         opponent_values = values_by_team[opponent_id]
-        opposing_probable = probable_by_key.get((game_id, opponent_id))
-        pitcher_id: Optional[int] = None
-        pitcher_hand: Optional[str] = None
-        pitcher_era: Optional[float] = None
-        if opposing_probable is not None:
-            pitcher_id = _required_int(
-                opposing_probable,
-                "pitcher_id",
-                f"probable_pitchers[{game_id},{opponent_id}]",
+        pitcher_features = _opposing_pitcher_features(
+            game_id, opponent_id, target_date, context
+        )
+        rows.append(
+            _build_team_feature_row(
+                snapshot=snapshot,
+                team_id=team_id,
+                opponent_id=opponent_id,
+                is_home=is_home,
+                team_values=team_values,
+                opponent_values=opponent_values,
+                pitcher_features=pitcher_features,
             )
-            raw_hand = opposing_probable.get("pitch_hand")
-            pitcher_hand = str(raw_hand) if raw_hand is not None else None
-            if pitcher_hand not in {None, "R", "L", "S"}:
-                raise IngestionError(
-                    f"invalid probable pitcher hand game_id={game_id} "
-                    f"team_id={opponent_id} hand={pitcher_hand!r}"
-                )
-            pitcher_era = _pitcher_era(pitcher_id, target_date, pitcher_history)
-
-        row = {
-            "game_id": game_id,
-            "team_id": team_id,
-            "opponent_team_id": opponent_id,
-            "season": season,
-            "scheduled_start_time_at_cutoff": _iso_utc(scheduled_start),
-            "is_home": is_home,
-            "feature_cutoff_at": _iso_utc(cutoff),
-            "computed_at": _iso_utc(normalized_computed_at),
-            "feature_schema_version": FEATURE_SCHEMA_VERSION,
-            "runs_avg_last_5": team_values["runs_avg_last_5"],
-            "hits_avg_last_5": team_values["hits_avg_last_5"],
-            "ops_last_5": team_values["ops_last_5"],
-            "runs_avg_last_10": team_values["runs_avg_last_10"],
-            "hits_avg_last_10": team_values["hits_avg_last_10"],
-            "ops_last_10": team_values["ops_last_10"],
-            "opposing_probable_pitcher_id": pitcher_id,
-            "opposing_pitcher_season_era": pitcher_era,
-            "opposing_pitcher_hand": pitcher_hand,
-            "team_wins_before_game": team_values["wins"],
-            "team_losses_before_game": team_values["losses"],
-            "opponent_wins_before_game": opponent_values["wins"],
-            "opponent_losses_before_game": opponent_values["losses"],
-        }
-        rows.append(row)
+        )
     return rows
 
 
@@ -547,17 +692,11 @@ def build_feature_rows(
     mode: str,
     computed_at: datetime,
 ) -> FeatureBuildResult:
-    (
-        games_by_id,
-        team_history,
-        pitcher_history,
-        probable_by_key,
-        incomplete_by_team,
-    ) = _build_context(games, team_logs, pitcher_logs, probables)
+    context = _build_context(games, team_logs, pitcher_logs, probables)
     selected_dates = set(target_dates) if target_dates is not None else None
     targets = [
         game
-        for game in games_by_id.values()
+        for game in context.games_by_id.values()
         if int(game["season"]) == season
         and str(game.get("game_type")) == game_type
         and (selected_dates is None or game["game_date"] in selected_dates)
@@ -569,7 +708,7 @@ def build_feature_rows(
             game["game_id"],
         )
     )
-    rows_by_game: Dict[int, List[Dict[str, Any]]] = {}
+    rows_by_game: Dict[int, List[FeatureRow]] = {}
     skipped = 0
     failed = 0
     for game in targets:
@@ -577,10 +716,7 @@ def build_feature_rows(
         try:
             rows = build_game_feature_rows(
                 game,
-                team_history=team_history,
-                pitcher_history=pitcher_history,
-                probable_by_key=probable_by_key,
-                incomplete_by_team=incomplete_by_team,
+                context=context,
                 mode=mode,
                 computed_at=computed_at,
             )
@@ -631,7 +767,7 @@ def ingest_features(
     mode: str,
     dry_run: bool,
     computed_at: Optional[datetime] = None,
-) -> Dict[str, int]:
+) -> FeatureIngestSummary:
     effective_computed_at = computed_at or _utc_now()
     games, team_logs, pitcher_logs, probables = load_feature_source_rows(
         client, season, game_type
@@ -678,7 +814,7 @@ def ingest_date(
     *,
     mode: str = MODE_LIVE,
     computed_at: Optional[datetime] = None,
-) -> Dict[str, int]:
+) -> FeatureIngestSummary:
     return ingest_features(
         client,
         season=target_date.year,
