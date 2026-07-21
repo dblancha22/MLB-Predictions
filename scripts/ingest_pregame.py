@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 try:
     from scripts import ingest_games_raw as games_ingestion
+    from scripts import ingest_pregame_team_features as feature_ingestion
     from scripts import ingest_probable_pitchers as probable_ingestion
     from scripts.ingestion.common import (
         DEFAULT_ENV_FILE,
@@ -26,6 +27,7 @@ try:
     from scripts.ingestion.mlb import MLBStatsClient, schedule_payloads_by_date
 except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
     import ingest_games_raw as games_ingestion  # type: ignore[no-redef]
+    import ingest_pregame_team_features as feature_ingestion  # type: ignore[no-redef]
     import ingest_probable_pitchers as probable_ingestion  # type: ignore[no-redef]
     from ingestion.common import (  # type: ignore[no-redef]
         DEFAULT_ENV_FILE,
@@ -44,7 +46,7 @@ except ModuleNotFoundError:  # Support direct `python scripts/...` execution.
 
 
 LOGGER = logging.getLogger("ingest_pregame")
-ALL_STEPS = ("games", "probable-pitchers")
+ALL_STEPS = ("games", "probable-pitchers", "team-features")
 PREGAME_SCHEDULE_HYDRATION = "probablePitcher,venue,team"
 
 
@@ -104,6 +106,10 @@ def run_pregame(
         "probable_rows_deleted": 0,
         "probable_games_failed": 0,
         "people_failed": 0,
+        "feature_games_skipped_started": 0,
+        "feature_games_failed": 0,
+        "feature_rows_ready": 0,
+        "feature_rows_upserted": 0,
     }
     failed_dates: Set[date] = set()
 
@@ -128,6 +134,7 @@ def run_pregame(
 
         for target_date in chunk:
             payload = schedules[target_date]
+            dependency_failed = False
             if "games" in selected:
                 try:
                     summary = games_ingestion.ingest_date(
@@ -143,6 +150,7 @@ def run_pregame(
                     totals["games_upserted"] += summary["games_upserted"]
                 except Exception as exc:
                     failed_dates.add(target_date)
+                    dependency_failed = True
                     LOGGER.error(
                         "date=%s stage=games action=fail error=%s", target_date, exc
                     )
@@ -166,10 +174,45 @@ def run_pregame(
                     totals["people_failed"] += summary["people_failed"]
                     if summary["games_failed"] or summary["people_failed"]:
                         failed_dates.add(target_date)
+                        dependency_failed = True
                 except Exception as exc:
                     failed_dates.add(target_date)
+                    dependency_failed = True
                     LOGGER.error(
                         "date=%s stage=probable-pitchers action=fail error=%s",
+                        target_date,
+                        exc,
+                    )
+
+            if "team-features" in selected:
+                if dependency_failed:
+                    LOGGER.warning(
+                        "date=%s stage=team-features action=skip "
+                        "reason=pregame-dependency-failed",
+                        target_date,
+                    )
+                    continue
+                try:
+                    summary = feature_ingestion.ingest_date(
+                        supabase_client,
+                        target_date,
+                        game_type,
+                        dry_run,
+                        mode=feature_ingestion.MODE_LIVE,
+                    )
+                    totals["feature_games_skipped_started"] += summary[
+                        "games_skipped_started"
+                    ]
+                    totals["feature_games_failed"] += summary["games_failed"]
+                    totals["feature_rows_ready"] += summary["rows_ready"]
+                    totals["feature_rows_upserted"] += summary["rows_upserted"]
+                    if summary["games_failed"]:
+                        failed_dates.add(target_date)
+                except Exception as exc:
+                    failed_dates.add(target_date)
+                    totals["feature_games_failed"] += 1
+                    LOGGER.error(
+                        "date=%s stage=team-features action=fail error=%s",
                         target_date,
                         exc,
                     )
@@ -184,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Populate same-day games_raw and probable_pitchers from one shared "
-            "MLB schedule run."
+            "MLB schedule run, then build pregame_team_features from Supabase."
         )
     )
     parser.add_argument("--today", action="store_true")
@@ -218,7 +261,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         validate_runtime_options(args.timeout, args.retries)
         if args.schedule_chunk_days <= 0:
             raise IngestionError("--schedule-chunk-days must be positive")
-        client = None if args.dry_run else create_supabase_client(args.env_file)
+        client = (
+            create_supabase_client(args.env_file)
+            if not args.dry_run or "team-features" in args.steps
+            else None
+        )
         mlb_client = MLBStatsClient(args.timeout, args.retries)
         LOGGER.info(
             "start dates=%s..%s timezone=%s steps=%s dry_run=%s",
@@ -251,7 +298,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "complete dates=%s dates_failed=%s games_upserted=%s "
         "probable_rows_upserted=%s probable_rows_deleted=%s "
         "probable_games_failed=%s people_failed=%s mlb_requests=%s "
-        "mlb_cache_hits=%s dry_run=%s",
+        "feature_games_skipped_started=%s feature_games_failed=%s "
+        "feature_rows_ready=%s feature_rows_upserted=%s mlb_cache_hits=%s dry_run=%s",
         totals["dates"],
         totals["dates_failed"],
         totals["games_upserted"],
@@ -260,6 +308,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         totals["probable_games_failed"],
         totals["people_failed"],
         totals["mlb_requests"],
+        totals["feature_games_skipped_started"],
+        totals["feature_games_failed"],
+        totals["feature_rows_ready"],
+        totals["feature_rows_upserted"],
         totals["mlb_cache_hits"],
         args.dry_run,
     )

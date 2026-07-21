@@ -226,23 +226,25 @@ Initial live validation completed on 2026-07-14:
 Implemented on 2026-07-18:
 
 - `scripts/ingest_pregame.py` is the routine same-day entry point for
-  `games_raw` and `probable_pitchers`.
+  `games_raw`, `probable_pitchers`, and `pregame_team_features`.
 - `--today` resolves the current calendar date in `America/Los_Angeles` by
   default. Explicit dates and short ranges remain available for testing and
   targeted recovery.
 - One `/schedule` response hydrated with `probablePitcher,venue,team` is shared
-  across both stages for each bounded date chunk.
+  across the two MLB-backed stages for each bounded date chunk. The feature
+  stage reads the stored raw tables from Supabase and makes no MLB request.
 - The games stage writes every schedule occurrence for the target date. The
   probable-pitcher stage remains restricted to MLB `Preview` games.
 - Missing venues and pitcher hands use the same run-scoped MLB client, and the
   command reports physical request and cache-hit totals.
-- The games stage runs first. If it fails for a date, the probable-pitcher stage
-  is skipped for that date. Probable transform or person-enrichment failures
-  make the final command exit nonzero while preserving safe writes for retry.
-- `--steps games` and `--steps probable-pitchers` remain available for targeted
-  recovery. The table-specific scripts also remain supported.
-- The future `pregame_team_features` stage is intentionally not implemented by
-  this command yet.
+- The feature stage runs after games and probable pitchers. A failure in either
+  selected dependency skips features for that date. Feature transform/write
+  failures make the final command exit nonzero while preserving safe writes
+  for retry.
+- Live feature mode skips games that have reached scheduled first pitch.
+- `--steps games`, `--steps probable-pitchers`, and `--steps team-features`
+  remain available for targeted recovery. The table-specific scripts also
+  remain supported.
 
 Commands:
 
@@ -251,7 +253,22 @@ python scripts/ingest_pregame.py --today
 python scripts/ingest_pregame.py --today --dry-run
 python scripts/ingest_pregame.py --date YYYY-MM-DD
 python scripts/ingest_pregame.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+python scripts/ingest_pregame.py --date YYYY-MM-DD --steps team-features
 ```
+
+`scripts/ingest_pregame_team_features.py` is the standalone historical and
+targeted feature command. `--mode historical` uses the stored scheduled start
+as the simulated cutoff and accepts `pregame`, `legacy_unknown`, and
+`postgame_recovery` probable assignments under the approved reconstruction
+policy.
+
+```bash
+python scripts/ingest_pregame_team_features.py --date YYYY-MM-DD --mode historical
+python scripts/ingest_pregame_team_features.py --season 2026 --mode historical
+```
+
+The 2026 season backfill completed on 2026-07-18 with 2,948 feature rows for
+1,474 games and no audit discrepancies.
 
 ## Shared Postgame Orchestration
 
@@ -370,7 +387,7 @@ written rows in place and causes a nonzero exit.
 
 The pregame workflow is separate from this previous-day sequence and may be
 refreshed before first pitch as operational scheduling permits. Its first stage
-creates the `games_raw` parent rows required by the future feature writer.
+creates the `games_raw` parent rows required by the feature writer.
 
 ## Suggested Ingestion Order
 

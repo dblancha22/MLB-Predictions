@@ -378,9 +378,16 @@ Ingestion notes:
 Purpose: frozen, model-ready pregame features from each team's perspective.
 Normally contains exactly two rows per game.
 
-Created empty on 2026-07-18 through migration
-`create_pregame_team_features` (`20260718234709`). Population logic has not yet
-been implemented.
+Created on 2026-07-18 through migration `create_pregame_team_features`
+(`20260718234709`). `scripts/ingest_pregame_team_features.py` is the standalone
+writer, and `scripts/ingest_pregame.py` invokes it after its two raw pregame
+stages.
+
+Observed row count: 2,948 rows for 1,474 2026 regular-season games as of
+2026-07-18, covering `2026-03-25` through `2026-07-18` with exactly two rows per
+game. The completed backfill audit found zero duplicate keys, formula
+mismatches, probable-pitcher mismatches, generated-percentage mismatches,
+metadata mismatches, or invalid negative values.
 
 Primary key: `(game_id, team_id)`
 
@@ -435,12 +442,18 @@ Feature notes:
   window sample-size columns are omitted because games played can be inferred
   from wins and losses.
 - OPS is aggregate window OBP plus aggregate window SLG, not an average of
-  per-game OPS values. Exact population waits for the remaining raw OPS inputs.
+  per-game OPS values.
 - Opposing pitcher ERA uses prior same-season earned runs and outs:
   `earned_runs_allowed * 27 / outs_recorded`.
 - Version 1 excludes same-day Game 1 results from Game 2 features.
 - `scheduled_start_time_at_cutoff` preserves the mutable schedule value known
   at calculation time.
+- Live mode uses the actual computation cutoff and skips started games;
+  historical mode uses the stored scheduled start as a simulated cutoff.
+- Historical version 1 accepts every probable-pitcher capture type under the
+  approved reconstruction assumption.
+- The writer paginates raw-table reads and upserts each two-row game pair by the
+  composite primary key while omitting generated percentage columns.
 
 Security:
 

@@ -7,8 +7,14 @@ for each team in an MLB game. A normally populated game has exactly two rows:
 one for the home team and one for the away team.
 
 The table was created in Supabase on 2026-07-18 through migration
-`create_pregame_team_features` (`20260718234709`). It is initially empty;
-population logic is a separate implementation step.
+`create_pregame_team_features` (`20260718234709`). Population is implemented by
+`scripts/ingest_pregame_team_features.py` and by the final stage of
+`scripts/ingest_pregame.py`.
+
+The initial 2026 historical backfill completed on 2026-07-18 with 2,948 rows
+for 1,474 regular-season games from 2026-03-25 through 2026-07-18. The audit
+found exactly two rows per game, no duplicate composite keys, and no formula,
+probable-pitcher, metadata, or generated-percentage discrepancies.
 
 ## Row Identity And Updates
 
@@ -69,9 +75,13 @@ percentage columns.
 
 ## Feature Definitions
 
-All source records must have been available by `feature_cutoff_at`. The exact
-routine cutoff time remains an operational decision for the future feature
-writer.
+The writer has two explicit timing modes:
+
+- Live mode uses the actual calculation time as `feature_cutoff_at` and skips
+  a game when that time is at or after its stored scheduled start.
+- Historical mode reconstructs features now while setting `feature_cutoff_at`
+  to the target game's stored scheduled start. `computed_at` still records the
+  actual later execution time.
 
 `scheduled_start_time_at_cutoff` preserves the scheduled first-pitch time known
 when the snapshot was generated. It is intentionally duplicated from
@@ -107,6 +117,9 @@ Opposing pitcher ERA:
   `pitcher_game_logs`.
 - Store null when no probable pitcher is known or the pitcher has no prior outs.
 - Store hand as `R`, `L`, `S`, or null.
+- Historical reconstruction accepts `pregame`, `legacy_unknown`, and
+  `postgame_recovery` assignments as the best available probable-pitcher value
+  for the target game. Capture provenance remains in the raw table.
 
 ## Doubleheaders
 
@@ -116,6 +129,13 @@ a trustworthy game-completion timestamp. Same-day Game 1 information can be
 considered later only when its final state before the Game 2 cutoff can be
 proven.
 
+Version 1 implements this rule by excluding every same-day game from the
+target's prior-game history, not only identified doubleheaders.
+
+The raw schema does not retain a trustworthy finalization timestamp. Rare
+suspended games can therefore create historical completion-time ambiguity; the
+known tradeoff is documented rather than hidden by an invented timestamp.
+
 ## Dependencies And Population Prerequisites
 
 Foreign keys require:
@@ -124,17 +144,28 @@ Foreign keys require:
 - `team_id` in `teams`
 - `opponent_team_id` in `teams`
 
-`scripts/ingest_pregame.py` now loads today's games into `games_raw` before it
-refreshes probable pitchers. This satisfies the raw foreign-key prerequisites;
-feature population itself has not yet been implemented.
+`scripts/ingest_pregame.py` loads today's games into `games_raw`, refreshes
+probable pitchers, and then invokes the live feature writer. A failed games or
+probable-pitcher stage prevents the dependent feature stage for that date.
 
 The job order is:
 
 1. Load today's schedule into `games_raw`.
 2. Refresh today's `probable_pitchers`.
-3. Generate the two `pregame_team_features` rows per eligible game (future
-   stage, not yet implemented).
+3. Generate the two `pregame_team_features` rows per eligible game.
 4. Update the same `games_raw` rows postgame and ingest final team/pitcher logs.
+
+Standalone commands:
+
+```bash
+python scripts/ingest_pregame_team_features.py --date YYYY-MM-DD --mode historical --dry-run
+python scripts/ingest_pregame_team_features.py --season 2026 --mode historical
+```
+
+The writer paginates Supabase reads, calculates one season in memory, treats a
+missing expected prior team-log pair as a game-level failure, and upserts each
+game's two rows together by `(game_id, team_id)`. It deliberately omits the two
+generated win-percentage columns from writes.
 
 ## Constraints And Indexes
 

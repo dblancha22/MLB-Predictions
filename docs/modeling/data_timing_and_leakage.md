@@ -8,6 +8,8 @@ The routine morning workflow has separate pregame and postgame commands:
 
 - `scripts/ingest_pregame.py --today` loads today's schedule into `games_raw`
   and then refreshes `probable_pitchers` from one shared schedule response.
+  Its third stage creates `pregame_team_features` for games that have not yet
+  reached their scheduled start.
 - `scripts/ingest_postgame.py --yesterday` processes the previous calendar day
   and updates `games_raw`, inserts missing MLB-retained probable assignments,
   then updates `team_game_logs` and `pitcher_game_logs` in dependency order.
@@ -24,8 +26,9 @@ Therefore:
   `postgame_recovery` identifies MLB-retained assignments fetched after final.
   Rows that predate the current writer are `legacy_unknown`. The standalone
   writer remains available for targeted pregame recovery.
-- `pregame_team_features` population remains unimplemented. When added, it must
-  run only after both current pregame stages succeed.
+- The feature stage runs only after the selected games and probable-pitcher
+  dependencies succeed. The standalone writer supports explicit historical
+  reconstruction and targeted recovery.
 
 ## Timing Categories
 
@@ -106,6 +109,13 @@ Probable-pitcher ID, hand, and entering ERA are copied into the feature row so
 later changes to the latest-state `probable_pitchers` table cannot alter the
 training record.
 
+Live feature runs use their actual calculation time as the cutoff and skip
+games that have started. Historical runs use the stored scheduled start as the
+simulated cutoff while retaining the later actual `computed_at`. Version 1
+excludes all same-day prior results. Because `games_raw` has no trustworthy
+completion timestamp, rare suspended/resumed games retain a documented timing
+ambiguity.
+
 ## Doubleheaders
 
 Doubleheaders need special handling.
@@ -151,6 +161,14 @@ Timing caution:
   A final response may insert a missing row as `postgame_recovery`; downstream
   leakage-safe training must not treat its `updated_at` as proof that the
   assignment was known before first pitch.
+
+Approved historical feature policy:
+
+- `pregame`, `legacy_unknown`, and `postgame_recovery` assignments may all be
+  used as the best available target-game probable-pitcher value during the 2026
+  reconstruction.
+- This is an explicit modeling assumption about assignment accuracy, not a
+  claim that the recovery timestamp was pregame.
 
 ## Odds
 

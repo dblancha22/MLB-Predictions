@@ -1,6 +1,9 @@
-# Raw Ingestion Acceptance Checklist
+# Ingestion Acceptance Checklist
 
 Use this checklist before considering a raw ingestion script ready.
+The raw-writer scope below applies to the raw table scripts. The separately
+approved `ingest_pregame_team_features.py` derived writer is governed by the
+Pregame Team Features section in this document.
 
 ## Scope
 
@@ -63,12 +66,37 @@ Use this checklist before considering a raw ingestion script ready.
 - The games and probable-pitcher stages share one schedule payload hydrated with
   `probablePitcher,venue,team` per bounded date chunk.
 - The games stage runs before the probable-pitcher stage.
-- A failed games stage skips the probable-pitcher stage for that date.
+- The feature stage runs after the games and probable-pitcher stages.
+- A failed games stage skips the probable-pitcher and feature stages for that
+  date. A failed probable-pitcher stage skips the feature stage.
 - A malformed probable game or failed person enrichment makes the command exit
   nonzero while preserving safe writes for retry.
 - Physical MLB request and cache-hit totals are logged.
-- `--steps games` and `--steps probable-pitchers` support targeted recovery.
-- The future feature stage is not yet implemented.
+- `--steps games`, `--steps probable-pitchers`, and `--steps team-features`
+  support targeted recovery.
+- Live feature processing skips games at or after scheduled first pitch.
+- Historical feature processing simulates the stored scheduled start cutoff.
+- Feature summaries report games found, started games skipped, game failures,
+  rows ready, and rows upserted.
+
+## Pregame Team Features
+
+- Produces exactly two rows per eligible game and upserts by
+  `(game_id, team_id)`.
+- Paginates all Supabase source reads beyond the Data API row limit.
+- Uses only same-season regular-season raw data.
+- Excludes every same-day game from version-1 history.
+- Uses all available prior games when fewer than five or ten exist; rolling
+  values are null when no prior game exists and records begin at `0-0`.
+- Calculates OPS from aggregate window inputs rather than averaging per-game
+  OPS values.
+- Calculates opposing pitcher ERA from prior same-season earned runs and outs.
+- Accepts all probable-pitcher capture types for the approved historical
+  reconstruction policy.
+- Treats a missing expected prior team-log pair as a failure rather than a
+  shorter valid window.
+- Does not write the generated win-percentage columns.
+- A same-date rerun replaces the existing snapshot without adding duplicates.
 
 ## Current Raw Tables
 

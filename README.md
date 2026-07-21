@@ -1,8 +1,9 @@
 # MLB Predictions Ingestion
 
 This repository currently focuses on populating MLB data tables in Supabase. The
-routine morning workflow loads today's schedule and probable pitchers before
-updating yesterday's completed game logs.
+routine morning workflow loads today's schedule and probable pitchers, builds
+the two pregame team-feature rows per eligible game, and then updates
+yesterday's completed game logs.
 
 ## Morning workflow
 
@@ -25,7 +26,9 @@ Run the pregame orchestrator:
 orchestrator shares one MLB schedule response while it first upserts every game
 for the date into `games_raw`, then synchronizes probable pitchers for games
 still in MLB's `Preview` state. It can be rerun before first pitch because the
-schedule and probable assignments are mutable.
+schedule and probable assignments are mutable. The final stage reads prior raw
+game logs from Supabase and upserts `pregame_team_features`; games that have
+already started are skipped in this live mode.
 
 ### 2. Populate yesterday's game logs
 
@@ -51,6 +54,7 @@ Review the command summary for:
 - failed schedule, boxscore, transform, or database operations
 - games discovered and upserted
 - probable-pitcher rows written or deleted
+- pregame feature rows ready and written
 - team-log rows written
 - pitcher-log rows written
 - pitcher-log processing markers completed
@@ -66,6 +70,14 @@ The table-specific scripts remain available for isolated recovery:
 .venv/bin/python scripts/ingest_probable_pitchers.py --date YYYY-MM-DD
 .venv/bin/python scripts/ingest_team_game_logs.py --date YYYY-MM-DD
 .venv/bin/python scripts/ingest_pitcher_game_logs.py --date YYYY-MM-DD
+.venv/bin/python scripts/ingest_pregame_team_features.py --date YYYY-MM-DD --mode historical
+```
+
+The feature writer also supports a full-season historical reconstruction:
+
+```bash
+.venv/bin/python scripts/ingest_pregame_team_features.py --season 2026 --mode historical --dry-run
+.venv/bin/python scripts/ingest_pregame_team_features.py --season 2026 --mode historical
 ```
 
 Use the pregame and postgame orchestrators for the normal daily run. Explicit

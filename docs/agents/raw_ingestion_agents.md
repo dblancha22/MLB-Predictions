@@ -76,7 +76,7 @@ Responsibilities:
 - Keep the previous-day `ingest_postgame.py` results/log workflow separate from
   the same-day `ingest_pregame.py` schedule/probable workflow.
 - Preserve pregame dependency ordering: `games_raw`, then `probable_pitchers`,
-  then the future `pregame_team_features` stage when it is implemented.
+  then the implemented `pregame_team_features` stage.
 - Maintain the shared request budget: one schedule response per bounded chunk
   and one boxscore response per unique final game in a process run.
 - Preserve dependency ordering: `games_raw`, then `team_game_logs`, then

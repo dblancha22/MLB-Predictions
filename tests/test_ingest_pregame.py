@@ -23,11 +23,11 @@ def args(**overrides):
 class PregameDateResolutionTests(unittest.TestCase):
     def test_step_parser_deduplicates_and_rejects_unknown_steps(self):
         self.assertEqual(
-            parse_steps("games,probable-pitchers,games"),
+            parse_steps("games,probable-pitchers,team-features,games"),
             ALL_STEPS,
         )
         with self.assertRaises(argparse.ArgumentTypeError):
-            parse_steps("team-features")
+            parse_steps("odds")
 
     def test_today_uses_configured_timezone(self):
         now = datetime(2026, 7, 19, 1, 0, tzinfo=timezone.utc)
@@ -68,6 +68,14 @@ class PregameOrchestrationTests(unittest.TestCase):
                 "people_failed": 0,
             }
 
+        feature_summary = {
+            "games_found": 1,
+            "games_skipped_started": 0,
+            "games_failed": 0,
+            "rows_ready": 2,
+            "rows_upserted": 0,
+        }
+
         mlb = MLBStatsClient()
         with patch(
             "scripts.ingestion.mlb.request_json", return_value=schedule
@@ -77,6 +85,9 @@ class PregameOrchestrationTests(unittest.TestCase):
         ), patch(
             "scripts.ingest_pregame.probable_ingestion.ingest_date",
             side_effect=probable_stage,
+        ), patch(
+            "scripts.ingest_pregame.feature_ingestion.ingest_date",
+            return_value=feature_summary,
         ):
             totals = run_pregame(
                 (target,),
@@ -97,6 +108,7 @@ class PregameOrchestrationTests(unittest.TestCase):
         self.assertIs(seen_payloads[0], seen_payloads[1])
         self.assertEqual(totals["games_upserted"], 1)
         self.assertEqual(totals["probable_rows_upserted"], 2)
+        self.assertEqual(totals["feature_rows_ready"], 2)
         self.assertEqual(totals["dates_failed"], 0)
         self.assertEqual(totals["mlb_requests"], 1)
 
@@ -111,7 +123,9 @@ class PregameOrchestrationTests(unittest.TestCase):
             side_effect=RuntimeError("games write failed"),
         ), patch(
             "scripts.ingest_pregame.probable_ingestion.ingest_date"
-        ) as probable_stage:
+        ) as probable_stage, patch(
+            "scripts.ingest_pregame.feature_ingestion.ingest_date"
+        ) as feature_stage:
             totals = run_pregame(
                 (target,),
                 supabase_client=None,
@@ -122,6 +136,7 @@ class PregameOrchestrationTests(unittest.TestCase):
                 retries=2,
             )
         probable_stage.assert_not_called()
+        feature_stage.assert_not_called()
         self.assertEqual(totals["dates_failed"], 1)
 
     def test_probable_only_recovery_does_not_run_games_stage(self):
@@ -172,7 +187,9 @@ class PregameOrchestrationTests(unittest.TestCase):
                 "games_failed": 0,
                 "people_failed": 1,
             },
-        ):
+        ), patch(
+            "scripts.ingest_pregame.feature_ingestion.ingest_date"
+        ) as feature_stage:
             totals = run_pregame(
                 (target,),
                 supabase_client=None,
@@ -184,6 +201,44 @@ class PregameOrchestrationTests(unittest.TestCase):
             )
         self.assertEqual(totals["people_failed"], 1)
         self.assertEqual(totals["dates_failed"], 1)
+        feature_stage.assert_not_called()
+
+    def test_feature_only_recovery_uses_existing_supabase_state(self):
+        target = date(2026, 7, 18)
+        schedule = {"dates": [{"date": target.isoformat(), "games": []}]}
+        mlb = MLBStatsClient()
+        feature_summary = {
+            "games_found": 1,
+            "games_skipped_started": 0,
+            "games_failed": 0,
+            "rows_ready": 2,
+            "rows_upserted": 2,
+        }
+        with patch(
+            "scripts.ingestion.mlb.request_json", return_value=schedule
+        ), patch(
+            "scripts.ingest_pregame.games_ingestion.ingest_date"
+        ) as games_stage, patch(
+            "scripts.ingest_pregame.probable_ingestion.ingest_date"
+        ) as probable_stage, patch(
+            "scripts.ingest_pregame.feature_ingestion.ingest_date",
+            return_value=feature_summary,
+        ) as feature_stage:
+            totals = run_pregame(
+                (target,),
+                supabase_client=object(),
+                mlb_client=mlb,
+                game_type="R",
+                dry_run=False,
+                timeout=30.0,
+                retries=2,
+                steps=("team-features",),
+            )
+        games_stage.assert_not_called()
+        probable_stage.assert_not_called()
+        feature_stage.assert_called_once()
+        self.assertEqual(totals["feature_rows_upserted"], 2)
+        self.assertEqual(totals["dates_failed"], 0)
 
 
 if __name__ == "__main__":
